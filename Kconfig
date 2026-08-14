@@ -1,0 +1,21 @@
+mainmenu "MiniRV NPC Configuration"
+
+menu "Trace"
+
+config ITRACE
+  bool "Enable instruction trace"
+  default y
+
+config MTRACE
+  bool "Enable memory trace"
+  default n
+
+config DTRACE
+  bool "Enable device trace"
+  default n
+
+config FTRACE
+  bool "Enable function trace"
+  default n
+
+endmenu
