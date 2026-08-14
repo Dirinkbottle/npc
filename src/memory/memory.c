@@ -79,9 +79,13 @@ static MemoryRegion *find_mmio(uint32_t addr, uint32_t len) {
 
 static uint32_t mmio_read(MemoryRegion *map, uint32_t addr, uint32_t len,
                           bool skip_difftest_one) {
+#ifdef CONFIG_DIFFTEST
   if (skip_difftest_one) {
     difftest_skip_ref();
   }
+#else
+  (void)skip_difftest_one;
+#endif
 
   const uint32_t offset = addr - map->start;
   if (map->handler != NULL) {
@@ -94,9 +98,13 @@ static uint32_t mmio_read(MemoryRegion *map, uint32_t addr, uint32_t len,
 
 static void mmio_write(MemoryRegion *map, uint32_t addr, uint32_t len,
                        uint32_t data, bool skip_difftest_one) {
+#ifdef CONFIG_DIFFTEST
   if (skip_difftest_one) {
     difftest_skip_ref();
   }
+#else
+  (void)skip_difftest_one;
+#endif
 
   const uint32_t offset = addr - map->start;
   store_le(map->space + offset, len, data);

@@ -33,21 +33,29 @@ typedef struct {
   bool is_write;
 } DtraceEntry;
 
+#ifdef CONFIG_ITRACE
 static ItraceEntry itrace_ring[TRACE_RING_SIZE];
 static uint64_t itrace_tail;
 static uint64_t itrace_pending;
+#endif
 
+#ifdef CONFIG_MTRACE
 static MtraceEntry mtrace_ring[TRACE_RING_SIZE];
 static uint64_t mtrace_tail;
 static uint64_t mtrace_pending;
+#endif
 
+#ifdef CONFIG_DTRACE
 static DtraceEntry dtrace_ring[TRACE_RING_SIZE];
 static uint64_t dtrace_tail;
 static uint64_t dtrace_pending;
+#endif
 
+#if defined(CONFIG_ITRACE) || defined(CONFIG_MTRACE) || defined(CONFIG_DTRACE)
 static uint64_t ring_start(uint64_t tail) {
   return tail > TRACE_RING_SIZE ? tail - TRACE_RING_SIZE : 0u;
 }
+#endif
 
 #if defined(CONFIG_ITRACE)
 static void format_disassembly(uint32_t pc, uint32_t inst,
@@ -105,15 +113,27 @@ static void print_dtrace(const DtraceEntry *entry) {
 #endif
 
 void init_trace(void) {
+#ifdef CONFIG_ITRACE
   itrace_tail = itrace_pending = 0;
+#endif
+#ifdef CONFIG_MTRACE
   mtrace_tail = mtrace_pending = 0;
+#endif
+#ifdef CONFIG_DTRACE
   dtrace_tail = dtrace_pending = 0;
+#endif
 }
 
 void trace_begin_step(void) {
+#ifdef CONFIG_ITRACE
   itrace_pending = itrace_tail;
+#endif
+#ifdef CONFIG_MTRACE
   mtrace_pending = mtrace_tail;
+#endif
+#ifdef CONFIG_DTRACE
   dtrace_pending = dtrace_tail;
+#endif
 }
 
 void trace_print_pending(void) {

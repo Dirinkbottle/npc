@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+#ifdef CONFIG_DIFFTEST
   if (init_difftest() != 0) {
     destroy_simulator();
     destroy_ftrace();
@@ -45,6 +46,7 @@ int main(int argc, char **argv) {
     return -1;
   }
   difftest_sync_initial();
+#endif
 
   if (mdb_batch_mode()) {
     cpu_exec(UINT64_MAX, false);

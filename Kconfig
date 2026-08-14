@@ -1,5 +1,13 @@
 mainmenu "MiniRV NPC Configuration"
 
+menu "Difftest"
+
+config DIFFTEST
+  bool "Enable differential testing against NEMU"
+  default n
+
+endmenu
+
 menu "Trace"
 
 config ITRACE

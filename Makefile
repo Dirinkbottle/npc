@@ -12,9 +12,12 @@ BUILDDIR := build
 VERILATED_FILE := $(addprefix $(BUILDDIR)/rtl/,libVminirv.a libverilated.a)
 VERILATOR_ROOT ?= $(shell verilator -getenv VERILATOR_ROOT)
 INCLUDEDIR :=$(addprefix -I,$(shell find . -type d -name 'include')) -I$(BUILDDIR)/rtl
-CFLAGS := -c $(INCLUDEDIR) -I$(VERILATOR_ROOT)/include -I$(VERILATOR_ROOT)/include/vltstd
+CFLAGS := -c $(INCLUDEDIR) -I$(VERILATOR_ROOT)/include -I$(VERILATOR_ROOT)/include/vltstd -MMD -MP -Wall -Wextra -Werror -Wno-sign-compare -g3 -Og  -fno-omit-frame-pointer \
+          -fno-optimize-sibling-calls \
+          -fsanitize=address,undefined,bounds-strict \
+          -fstack-protector-strong
 CXXFLAGS := -c $(INCLUDEDIR) -I$(VERILATOR_ROOT)/include -I$(VERILATOR_ROOT)/include/vltstd
-LDFLAGS :=
+LDFLAGS := -fsanitize=address,undefined,bounds-strict
 LDLIBS := -lreadline -ldl
 SRC := $(shell find src backend -type d -path 'src/tools' -prune -o -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.S" \) -print)
 VSRC := $(shell find rtl -type f -name "*.v")

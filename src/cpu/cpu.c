@@ -99,7 +99,9 @@ static void exec_once(bool display_trace) {
   rtl_bridge_set_clock(true);
   rtl_bridge_eval_and_dump();
 
+#ifdef CONFIG_DIFFTEST
   difftest_step(pc, inst);
+#endif
   ftrace_step(pc, inst, cpu_current_pc());
 
   if (sim_is_running() && wp_scan() > 0) {

@@ -4,12 +4,6 @@
 #
 
 #
-# Difftest
-#
-# CONFIG_DIFFTEST is not set
-# end of Difftest
-
-#
 # Trace
 #
 # CONFIG_ITRACE is not set
