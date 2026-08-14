@@ -13,18 +13,23 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-#ifndef __SDB_H__
-#define __SDB_H__
+#ifndef NPC_SDB_H
+#define NPC_SDB_H
 
-bool make_token(char *e);
+#include <stdbool.h>
 
 void init_sdb(void);
+void init_mdb(int argc, char **argv);
+
+const char *mdb_image_file(void);
+const char *mdb_elf_file(void);
+bool mdb_batch_mode(void);
+bool mdb_use_internal_img(void);
+
+void sdb_mainloop(void);
+
 void init_wp_pool(void);
-
-struct watchpoint;
-typedef struct watchpoint WP;
-
-void wp_set(char* e);
+void wp_set(char *expr);
 void wp_delete(int no);
 void wp_print(void);
 int wp_scan(void);

@@ -1,42 +1,34 @@
-enum class MemoryType {
-  Normal,
-  Device,
-};
-// A device receives the byte offset in its MMIO range, the access length, and
-// whether the access is a write.  The mapped backing store has already been
-// updated before a write handler runs; a read handler may prepare it first.
-using memory_handler_t = void (*)(std::uint32_t offset, std::uint32_t len,
-                                  bool is_write);
+#ifndef NPC_MEMORY_H
+#define NPC_MEMORY_H
 
-struct MemoryRegion {
-  const char *name;
-  std::uint32_t start;
-  std::uint32_t end;  // Inclusive.
-  std::uint8_t *space;
-  MemoryType type;
-  memory_handler_t memory_handler;
-};
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
+#define PMEM_BASE     UINT32_C(0x80000000)
+#define PMEM_SIZE     ((size_t)0x10000000u)
+#define MAX_MMIO_MAPS 16u
 
-void destroy_simulator();
+typedef void (*memory_handler_t)(uint32_t offset, uint32_t len, bool is_write);
 
-// Physical memory and image lifecycle.
 bool init_memory(const char *image_file);
-bool init_internal_img();
-void destroy_memory();
-uint8_t *pmem_space();
-std::size_t pmem_image_size();
-bool debug_pmem_read(std::uint32_t addr, std::uint32_t len,
-                     std::uint32_t *data);
+bool init_internal_img(void);
+void destroy_memory(void);
 
-// MMIO registration and lookup.  `size` is expressed in bytes.
-void add_mmio_map(const char *name, std::uint32_t start, std::uint32_t size,
-                  std::uint8_t *space, memory_handler_t memory_handler);
-MemoryRegion *find_mmio(std::uint32_t addr, std::uint32_t len);
+uint8_t *pmem_space(void);
+size_t pmem_image_size(void);
+uint32_t memory_last_pc(void);
 
-extern "C" std::uint32_t pmem_read(std::uint32_t raddr,
-                                   unsigned char byte_mask,
-                                   bool skip_difftest_one);
-extern "C" void pmem_write(std::uint32_t waddr, std::uint32_t wdata,
-                           char byte_mask, bool skip_difftest_one);
-extern "C" std::uint32_t prom_read(std::uint32_t rom_addr);
+bool debug_pmem_read(uint32_t addr, uint32_t len, uint32_t *data);
+
+void add_mmio_map(const char *name, uint32_t start, uint32_t size,
+                  uint8_t *space, memory_handler_t handler);
+
+/* DPI-C entry points imported by the RTL. */
+uint32_t pmem_read(uint32_t raddr, unsigned char byte_mask,
+                   bool skip_difftest_one);
+void pmem_write(uint32_t waddr, uint32_t wdata, char byte_mask,
+                bool skip_difftest_one);
+uint32_t prom_read(uint32_t rom_addr);
+
+#endif
