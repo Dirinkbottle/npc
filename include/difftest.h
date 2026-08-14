@@ -1,9 +1,8 @@
 #ifndef __DIFFTEST__
 #define __DIFFTEST__
 #define NEMU_SO "/home/inkbottle/othersrc/ysyx/ysyx-workbench/ics-pa/nemu/build/riscv32-nemu-interpreter-so"
-
-#include <cstddef>
-#include <cstdint>
+#include <stdint.h>
+#include <stddef.h>
 extern bool skip_one_difftest_exec;
 enum { DIFFTEST_TO_DUT, DIFFTEST_TO_REF };
 

@@ -1,10 +1,8 @@
 #ifndef NPC_CSRC_FTRACE_H
 #define NPC_CSRC_FTRACE_H
-
-#include <cstdint>
-#include "common.h"
-
 #ifdef CONFIG_FTRACE
+#include<stdint.h>
+#include<stddef.h>
 // Ftrace is active only after an ELF file is supplied with `-e ELF`.
 // It observes already-committed control-flow instructions and never affects
 // the RTL's execution.
