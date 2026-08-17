@@ -183,6 +183,20 @@ static const FunctionSymbol *find_function(uint32_t pc) {
   return NULL;
 }
 
+bool ftrace_lookup_function(const char *name, uint32_t *start, uint32_t *end) {
+  if (name == NULL || start == NULL || end == NULL) {
+    return false;
+  }
+  for (size_t i = 0; i < nr_functions; i++) {
+    if (strcmp(functions[i].name, name) == 0) {
+      *start = functions[i].start;
+      *end = functions[i].end;
+      return true;
+    }
+  }
+  return false;
+}
+
 static const char *function_name(const FunctionSymbol *function) {
   return function == NULL ? "??" : function->name;
 }
@@ -333,7 +347,9 @@ void init_ftrace(const char *elf_file) {
   }
 
   free(image);
-  qsort(functions, nr_functions, sizeof(*functions), compare_function);
+  if (nr_functions > 0u) {
+    qsort(functions, nr_functions, sizeof(*functions), compare_function);
+  }
 
   if (nr_functions == 0u) {
     printf(FMT_YELLOW "ftrace: no STT_FUNC symbols found in '%s'" FMT_NONE "\n",

@@ -36,19 +36,16 @@ typedef struct {
 #ifdef CONFIG_ITRACE
 static ItraceEntry itrace_ring[TRACE_RING_SIZE];
 static uint64_t itrace_tail;
-static uint64_t itrace_pending;
 #endif
 
 #ifdef CONFIG_MTRACE
 static MtraceEntry mtrace_ring[TRACE_RING_SIZE];
 static uint64_t mtrace_tail;
-static uint64_t mtrace_pending;
 #endif
 
 #ifdef CONFIG_DTRACE
 static DtraceEntry dtrace_ring[TRACE_RING_SIZE];
 static uint64_t dtrace_tail;
-static uint64_t dtrace_pending;
 #endif
 
 #if defined(CONFIG_ITRACE) || defined(CONFIG_MTRACE) || defined(CONFIG_DTRACE)
@@ -114,63 +111,13 @@ static void print_dtrace(const DtraceEntry *entry) {
 
 void init_trace(void) {
 #ifdef CONFIG_ITRACE
-  itrace_tail = itrace_pending = 0;
+  itrace_tail = 0;
 #endif
 #ifdef CONFIG_MTRACE
-  mtrace_tail = mtrace_pending = 0;
+  mtrace_tail = 0;
 #endif
 #ifdef CONFIG_DTRACE
-  dtrace_tail = dtrace_pending = 0;
-#endif
-}
-
-void trace_begin_step(void) {
-#ifdef CONFIG_ITRACE
-  itrace_pending = itrace_tail;
-#endif
-#ifdef CONFIG_MTRACE
-  mtrace_pending = mtrace_tail;
-#endif
-#ifdef CONFIG_DTRACE
-  dtrace_pending = dtrace_tail;
-#endif
-}
-
-void trace_print_pending(void) {
-#ifdef CONFIG_ITRACE
-  uint64_t start = itrace_pending;
-  const uint64_t oldest = ring_start(itrace_tail);
-  if (start < oldest) {
-    start = oldest;
-  }
-  for (uint64_t i = start; i < itrace_tail; i++) {
-    print_itrace(&itrace_ring[i % TRACE_RING_SIZE]);
-  }
-  itrace_pending = itrace_tail;
-#endif
-
-#ifdef CONFIG_MTRACE
-  uint64_t mstart = mtrace_pending;
-  const uint64_t moldest = ring_start(mtrace_tail);
-  if (mstart < moldest) {
-    mstart = moldest;
-  }
-  for (uint64_t i = mstart; i < mtrace_tail; i++) {
-    print_mtrace(&mtrace_ring[i % TRACE_RING_SIZE]);
-  }
-  mtrace_pending = mtrace_tail;
-#endif
-
-#ifdef CONFIG_DTRACE
-  uint64_t dstart = dtrace_pending;
-  const uint64_t doldest = ring_start(dtrace_tail);
-  if (dstart < doldest) {
-    dstart = doldest;
-  }
-  for (uint64_t i = dstart; i < dtrace_tail; i++) {
-    print_dtrace(&dtrace_ring[i % TRACE_RING_SIZE]);
-  }
-  dtrace_pending = dtrace_tail;
+  dtrace_tail = 0;
 #endif
 }
 
@@ -187,6 +134,15 @@ void itrace_record(uint32_t pc, uint32_t inst) {
 #ifdef CONFIG_ITRACE
   itrace_ring[itrace_tail % TRACE_RING_SIZE] = (ItraceEntry){pc, inst};
   itrace_tail++;
+#else
+  (void)pc;
+  (void)inst;
+#endif
+}
+
+void itrace_print(uint32_t pc, uint32_t inst) {
+#ifdef CONFIG_ITRACE
+  print_itrace(&(ItraceEntry){pc, inst});
 #else
   (void)pc;
   (void)inst;

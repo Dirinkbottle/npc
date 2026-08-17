@@ -28,7 +28,6 @@ static void print_usage(const char *program) {
          " %s [-b] [-d] [-f image] [-e program.elf] [image]\n",
          program);
   puts("  -b, --batch       run continuously instead of entering the monitor");
-  puts("  -d, --debug       print enabled trace entries while running");
   puts("  -f, --file FILE   load a binary image");
   puts("  -e, --elf FILE    load ELF symbols for ftrace/backtrace");
   puts("  -i, --img         use the built-in internal test image");
@@ -43,7 +42,7 @@ static int cmd_continue(char *args) {
     print_usage_hint("c");
     return 0;
   }
-  cpu_exec(UINT64_MAX, false);
+  cpu_exec(UINT64_MAX);
   return 0;
 }
 
@@ -58,7 +57,7 @@ static int cmd_step(char *args) {
       return 0;
     }
   }
-  cpu_exec(n, true);
+  cpu_exec(n);
   return 0;
 }
 
@@ -115,7 +114,34 @@ static int cmd_watchpoint(char *args) {
 
 static int cmd_delete_watchpoint(char *args) {
   if (args == NULL) {
-    print_usage_hint("d N");
+    print_usage_hint("d N | d b N");
+    return 0;
+  }
+
+  if (strncmp(args, "b ", 2u) == 0) {
+    char *number_text = args + 2;
+    while (isspace((unsigned char)*number_text)) {
+      number_text++;
+    }
+    if (*number_text == '\0') {
+      print_usage_hint("d b N | d b <function/addr>");
+      return 0;
+    }
+
+    char *end = NULL;
+    errno = 0;
+    const unsigned long long number = strtoull(number_text, &end, 0);
+    if (errno == 0 && end != number_text && *end == '\0') {
+      if (number <= INT32_MAX) {
+        (void)fbreakpoint_delete((int)number);
+      } else if (number <= UINT32_MAX) {
+        (void)fbreakpoint_delete_addr((uint32_t)number);
+      } else {
+        print_usage_hint("d b N | d b <function/addr>");
+      }
+    } else {
+      (void)fbreakpoint_delete_name(number_text);
+    }
     return 0;
   }
 
@@ -131,12 +157,47 @@ static int cmd_delete_watchpoint(char *args) {
   return 0;
 }
 
+static int cmd_breakpoint(char *args) {
+  if (args == NULL || *args == '\0') {
+    print_usage_hint("b <function symbol/addr>");
+    return 0;
+  }
+
+  char *end = NULL;
+  errno = 0;
+  const unsigned long long addr = strtoull(args, &end, 0);
+  if (errno == 0 && end != args && *end == '\0' && addr <= UINT32_MAX) {
+    (void)fbreakpoint_set_addr((uint32_t)addr);
+  } else {
+    (void)fbreakpoint_set_name(args);
+  }
+  return 0;
+}
+
 static const char *const reg_abi_names[32] = {
     "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
     "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
     "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
     "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6",
 };
+
+enum {
+  CSR_MSTATUS  = 0x300,
+  CSR_MTVEC    = 0x305,
+  CSR_MSCRATCH = 0x340,
+  CSR_MEPC     = 0x341,
+  CSR_MCAUSE   = 0x342,
+};
+
+static void print_csr_value(const char *name, uint32_t csr_addr) {
+  uint32_t value = 0u;
+  if (!cpu_csr_read(csr_addr, &value)) {
+    return;
+  }
+  printf(FMT_CYAN "%-10s" FMT_NONE ": "
+                  FMT_GREEN "0x%08x" FMT_NONE "\n",
+         name, value);
+}
 
 static void print_registers(void) {
   for (uint32_t i = 0; i < 32u; i++) {
@@ -152,11 +213,28 @@ static void print_registers(void) {
   printf(FMT_CYAN "pc        " FMT_NONE ": "
                   FMT_GREEN "0x%08x" FMT_NONE "\n",
          cpu_current_pc());
+
+  uint32_t mstatus = 0u;
+  (void)cpu_csr_read(CSR_MSTATUS, &mstatus);
+  printf(FMT_CYAN "mstatus   " FMT_NONE ": "
+                  FMT_GREEN "0x%08x" FMT_NONE
+                  "  " FMT_CYAN "mie=%u" FMT_NONE
+                  "  " FMT_CYAN "mpie=%u" FMT_NONE
+                  "  " FMT_CYAN "mpp=%u" FMT_NONE "\n",
+         mstatus,
+         (mstatus >> 3) & 1u,
+         (mstatus >> 7) & 1u,
+         (mstatus >> 11) & 3u);
+
+  print_csr_value("mtvec", CSR_MTVEC);
+  print_csr_value("mscratch", CSR_MSCRATCH);
+  print_csr_value("mepc", CSR_MEPC);
+  print_csr_value("mcause", CSR_MCAUSE);
 }
 
 static int cmd_info(char *args) {
   if (args == NULL) {
-    print_usage_hint("info r | info w");
+    print_usage_hint("info r | info w | info b");
     return 0;
   }
   if (strcmp(args, "w") == 0) {
@@ -167,7 +245,11 @@ static int cmd_info(char *args) {
     print_registers();
     return 0;
   }
-  print_usage_hint("info r | info w");
+  if (strcmp(args, "b") == 0) {
+    fbreakpoint_print();
+    return 0;
+  }
+  print_usage_hint("info r | info w | info b");
   return 0;
 }
 
@@ -238,10 +320,11 @@ static int cmd_help(char *args);
 static const Command commands[] = {
     {"c", "continue execution", cmd_continue},
     {"si", "step N instructions (default 1)", cmd_step},
+    {"b", "set function breakpoint: b <function symbol/addr>", cmd_breakpoint},
     {"p", "evaluate expression", cmd_p},
     {"w", "set watchpoint: w EXPR", cmd_watchpoint},
-    {"d", "delete watchpoint: d N", cmd_delete_watchpoint},
-    {"info", "show registers/watchpoints: info r | info w", cmd_info},
+    {"d", "delete watchpoint/function breakpoint: d N | d b N", cmd_delete_watchpoint},
+    {"info", "show registers/watchpoints/breakpoints: info r | info w | info b", cmd_info},
     {"bt", "show ftrace call stack (requires -e ELF)", cmd_backtrace},
     {"itrace", "show the latest instruction trace entries", cmd_itrace},
     {"mtrace", "show the latest physical-memory trace entries", cmd_mtrace},
@@ -316,12 +399,12 @@ static void execute_line(char *line) {
 void init_sdb(void) {
   init_regex();
   init_wp_pool();
+  init_fbreakpoint();
 }
 
 void init_mdb(int argc, char **argv) {
   static const struct option long_options[] = {
       {"batch", no_argument, NULL, 'b'},
-      {"debug", no_argument, NULL, 'd'},
       {"file", required_argument, NULL, 'f'},
       {"elf", required_argument, NULL, 'e'},
       {"img", no_argument, NULL, 'i'},
@@ -330,11 +413,10 @@ void init_mdb(int argc, char **argv) {
   };
 
   int option;
-  while ((option = getopt_long_only(argc, argv, "bde:f:ih",
+  while ((option = getopt_long_only(argc, argv, "be:f:ih",
                                     long_options, NULL)) != -1) {
     switch (option) {
       case 'b': batch_mode = true; break;
-      case 'd': cpu_set_debug(true); break;
       case 'f': image_file = optarg; break;
       case 'e': elf_file = optarg; break;
       case 'i': use_internal_img = true; break;
