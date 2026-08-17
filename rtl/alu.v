@@ -307,7 +307,8 @@ module alu (
 
     shifter u_shifter(
         .source_data (data1 ),
-        .shift       (data2[5:0]       ),
+        // RV32I寄存器移位只使用rs2的低5位；最高位补0以适配64位移位器接口。
+        .shift       ({1'b0, data2[4:0]}),
         .op          (shifter_op          ),
         .outdata     (shifter_out     )
     );
@@ -356,7 +357,8 @@ module alu (
             ADD,adder_sum,
             SUB,adder_sum,
             SHIFT,shifter_out,
-            COMPARE,64'd0,
+            // 比较器结果写入bit 0，供SLT/SLTU写回rd。
+            COMPARE,{{63{1'b0}}, sz},
             XOR_OP,xor_out,
             OR_OP,or_out,
             AND_OP,and_out,
