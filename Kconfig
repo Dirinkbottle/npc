@@ -8,6 +8,22 @@ config DIFFTEST
 
 endmenu
 
+menu "Build options"
+
+choice
+  prompt "Build type"
+  default BUILD_DEBUG
+
+config BUILD_DEBUG
+  bool "Debug"
+
+config BUILD_RELEASE
+  bool "Release"
+
+endchoice
+
+endmenu
+
 menu "Trace"
 
 config ITRACE
@@ -24,6 +40,10 @@ config DTRACE
 
 config FTRACE
   bool "Enable function trace"
+  default n
+
+config DUMP_WAVE
+  bool "Dump waveform during execution"
   default n
 
 endmenu

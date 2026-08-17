@@ -4,3 +4,4 @@
  * MiniRV NPC Configuration
  *
  */
+#define CONFIG_BUILD_RELEASE 1
