@@ -87,7 +87,10 @@ static void *open_capstone_library(void) {
 }
 
 void init_disasm(void) {
+  (void)load_symbol;
+
   void *dl_handle = open_capstone_library();
+  (void)dl_handle;
   assert(dl_handle != NULL);
 
   cs_err (*cs_open_fn)(cs_arch arch, cs_mode mode, csh *handle) = NULL;
@@ -96,6 +99,7 @@ void init_disasm(void) {
   assert(load_symbol(dl_handle, &cs_free_fn, "cs_free"));
 
   const cs_err ret = cs_open_fn(CS_ARCH_RISCV, CS_MODE_RISCV32, &cs_handle);
+  (void)ret;
   assert(ret == CS_ERR_OK);
 }
 

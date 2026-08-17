@@ -10,13 +10,19 @@
 static uint8_t uart_space[UART_MMIO_SIZE];
 
 static void uart_handler(uint32_t offset, uint32_t len, bool is_write) {
-  if (!is_write || offset != 0u || len != 1u) {
+  if (offset != 0u || len != 1u) {
     printf(FMT_RED "unsupported UART access: offset=%u len=%u write=%d" FMT_NONE "\n",
            offset, len, is_write ? 1 : 0);
     sim_abort();
     return;
   }
-  putch((char)uart_space[0]);
+  if (is_write) {
+    putch((char)uart_space[0]);
+  }else {
+    int ch = getchar();
+    uart_space[0] = (char)(ch==EOF ? 0xff :ch);
+    return;
+  }
 }
 
 void init_devices(void) {
