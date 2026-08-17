@@ -20,9 +20,29 @@ enum {
   DIFFTEST_TO_REF,
 };
 
+enum {
+  CSR_MSTATUS  = 0x300,
+  CSR_MTVEC    = 0x305,
+  CSR_MSCRATCH = 0x340,
+  CSR_MEPC     = 0x341,
+  CSR_MCAUSE   = 0x342,
+};
+
+static const uint32_t difftest_csr_addrs[] = {
+    CSR_MSTATUS,
+    CSR_MTVEC,
+    CSR_MSCRATCH,
+    CSR_MEPC,
+    CSR_MCAUSE,
+};
+
+#define NR_DIFFTEST_CSR \
+  ((uint32_t)(sizeof(difftest_csr_addrs) / sizeof(difftest_csr_addrs[0])))
+
 typedef struct {
   uint32_t gpr[32];
   uint32_t pc;
+  uint32_t csr[NR_DIFFTEST_CSR];
 } DifftestCpuState;
 
 static void (*ref_memcpy)(uint64_t addr, void *buf, size_t n, bool direction);
@@ -72,6 +92,10 @@ static void read_dut_state(DifftestCpuState *state) {
     (void)cpu_reg_read(i, &state->gpr[i]);
   }
   state->pc = cpu_current_pc();
+  for (uint32_t i = 0; i < NR_DIFFTEST_CSR; i++) {
+    state->csr[i] = 0u;
+    (void)cpu_csr_read(difftest_csr_addrs[i], &state->csr[i]);
+  }
 }
 
 void difftest_sync_initial(void) {
@@ -130,6 +154,7 @@ void difftest_step(uint32_t pc, uint32_t inst) {
       continue;
     }
 
+    // 这里就没匹配
     if (!header_printed) {
       print_mismatch_header(pc, inst);
       header_printed = true;
@@ -138,7 +163,25 @@ void difftest_step(uint32_t pc, uint32_t inst) {
            "  " FMT_RED "DUT = 0x%08x" FMT_NONE
            "  " FMT_GREEN "REF = 0x%08x" FMT_NONE "\n",
            i, dut_value, ref_state.gpr[i]);
-    set_npc_state(SIM_ABORT);
+    sim_abort();
+  }
+
+  for (uint32_t i = 0; i < NR_DIFFTEST_CSR; i++) {
+    uint32_t dut_value = 0u;
+    (void)cpu_csr_read(difftest_csr_addrs[i], &dut_value);
+    if (dut_value == ref_state.csr[i]) {
+      continue;
+    }
+
+    if (!header_printed) {
+      print_mismatch_header(pc, inst);
+      header_printed = true;
+    }
+    printf("  " FMT_BOLD FMT_CYAN "csr_%03x" FMT_NONE
+           "  " FMT_RED "DUT = 0x%08x" FMT_NONE
+           "  " FMT_GREEN "REF = 0x%08x" FMT_NONE "\n",
+           difftest_csr_addrs[i], dut_value, ref_state.csr[i]);
+    sim_abort();
   }
 
   const uint32_t dut_pc = cpu_current_pc();
@@ -150,6 +193,6 @@ void difftest_step(uint32_t pc, uint32_t inst) {
            "  " FMT_RED "DUT = 0x%08x" FMT_NONE
            "  " FMT_GREEN "REF = 0x%08x" FMT_NONE "\n",
            dut_pc, ref_state.pc);
-    set_npc_state(SIM_ABORT);
+    sim_abort();
   }
 }

@@ -2,6 +2,7 @@
 
 #include <new>
 
+#include "config.h"
 #include <Vminirv.h>
 #include <Vminirv___024root.h>
 #include <verilated.h>
@@ -12,14 +13,16 @@ namespace {
 Vminirv *top = nullptr;
 VerilatedVcdC *wave = nullptr;
 
-void eval_and_dump_impl() {
+void eval_impl() {
   if (top == nullptr) {
     return;
   }
   top->eval();
+#ifdef CONFIG_DUMP_WAVE
   if (wave != nullptr) {
     wave->dump(Verilated::time());
   }
+#endif
   Verilated::timeInc(1);
 }
 
@@ -29,6 +32,7 @@ extern "C" bool rtl_bridge_init(int argc, char **argv) {
   Verilated::commandArgs(argc, argv);
 
   top = new (std::nothrow) Vminirv;
+#ifdef CONFIG_DUMP_WAVE
   wave = new (std::nothrow) VerilatedVcdC;
   if (top == nullptr || wave == nullptr) {
     rtl_bridge_destroy();
@@ -38,13 +42,19 @@ extern "C" bool rtl_bridge_init(int argc, char **argv) {
   Verilated::traceEverOn(true);
   top->trace(wave, 99);
   wave->open("waveform.vcd");
+#else
+  if (top == nullptr) {
+    rtl_bridge_destroy();
+    return false;
+  }
+#endif
 
   /* Synchronous reset for one complete clock cycle. */
   top->rst = 1;
   top->clk = 0;
-  eval_and_dump_impl();
+  eval_impl();
   top->clk = 1;
-  eval_and_dump_impl();
+  eval_impl();
 
   /* Evaluate the first fetch without committing an instruction. */
   top->rst = 0;
@@ -57,11 +67,13 @@ extern "C" void rtl_bridge_destroy(void) {
   if (top != nullptr) {
     top->final();
   }
+#ifdef CONFIG_DUMP_WAVE
   if (wave != nullptr) {
     wave->close();
     delete wave;
     wave = nullptr;
   }
+#endif
   delete top;
   top = nullptr;
 }
@@ -72,8 +84,8 @@ extern "C" void rtl_bridge_set_clock(bool high) {
   }
 }
 
-extern "C" void rtl_bridge_eval_and_dump(void) {
-  eval_and_dump_impl();
+extern "C" void rtl_bridge_eval(void) {
+  eval_impl();
 }
 
 extern "C" uint32_t rtl_bridge_pc(void) {
@@ -93,5 +105,23 @@ extern "C" bool rtl_bridge_reg_read(uint32_t index, uint32_t *value) {
     return false;
   }
   *value = top->rootp->minirv__DOT__minirv_registerfile__DOT__registersfile[index];
+  return true;
+}
+
+extern "C" bool rtl_bridge_csr_read(uint32_t index, uint32_t *value) {
+  if (top == nullptr || value == nullptr || index >= 4096u) {
+    return false;
+  }
+  *value =
+      top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index];
+  return true;
+}
+
+extern "C" bool rtl_bridge_csr_write(uint32_t index, uint32_t value) {
+  if (top == nullptr || index >= 4096u) {
+    return false;
+  }
+  top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index] =
+      value;
   return true;
 }
