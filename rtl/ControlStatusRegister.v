@@ -58,7 +58,7 @@ module ControlStatusRegister(
     wire MSTATUS_MPIE = mstatus[7];
     wire [1:0] MSTATUS_MPP = mstatus[12:11];
     
-    wire csr_write_enable = rs1!=0 & (csr_op==CSRRW)?1'b1:
+    wire csr_write_enable = (csr_op==CSRRW)?1'b1:
                             (csr_op==CSRRS)?1'b1:
                             (csr_op==CSRRC)?1'b1:
                             (csr_op==CSRRWI)?1'b1:
@@ -70,7 +70,7 @@ module ControlStatusRegister(
     wire system_csr_write_enable = (csr_op==MRET)?1'b1:
                                    (csr_op==ECALL)?1'b1:
                                    1'b0;
-    wire general_csr_write_enable = rs1!=0 & (csr_op==CSRRW)?1'b1:
+    wire general_csr_write_enable = (csr_op==CSRRW)?1'b1: 
                                     (csr_op==CSRRS)?1'b1:
                                     (csr_op==CSRRC)?1'b1:
                                     (csr_op==CSRRWI)?1'b1:
