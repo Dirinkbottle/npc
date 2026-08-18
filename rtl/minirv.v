@@ -284,7 +284,8 @@ module minirv (
     assign mem_addr_nowordalign = alu_result[31:0];
     assign mem_addr_word_aligned = mem_addr_nowordalign & (~32'd3);
     assign mem_addr_byte_slack = mem_addr_nowordalign[1:0];
-    assign mem_write_data = registerfile_read_data2;
+    // AXI WDATA follows the same byte lane selected by WSTRB.
+    assign mem_write_data = registerfile_read_data2 << {mem_addr_byte_slack, 3'b000};
 
     alu minirv_alu(
         .opcode      (alu_op),
