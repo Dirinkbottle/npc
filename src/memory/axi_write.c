@@ -9,7 +9,7 @@
 /*
  * AXI-Lite RAM write slave.
  *
- * The RTL master currently issues AW first, then W, then waits for B.  READY is
+ * The RTL master currently issues AW first, then W, then waits for B. READY is
  * held until the master drops VALID, so the C model cannot accidentally create
  * a zero-time handshake between two Verilator evals.
  */
@@ -26,6 +26,21 @@ static AxiWriteState write_state = AXI_WRITE_IDLE;
 static uint32_t write_addr = 0;
 static uint32_t write_data = 0;
 static uint8_t write_strobe = 0;
+
+static uint32_t strobe_offset(uint8_t strobe) {
+  switch (strobe & 0x0fu) {
+    case 0x01u: return 0u;
+    case 0x02u: return 1u;
+    case 0x04u: return 2u;
+    case 0x08u: return 3u;
+    case 0x03u: return 0u;
+    case 0x0cu: return 2u;
+    case 0x0fu: return 0u;
+    default:
+      assert(0 && "invalid AXI WSTRB");
+      return 0u;
+  }
+}
 
 void pmem_write_axi(void) {
   switch (write_state) {
@@ -62,9 +77,14 @@ void pmem_write_axi(void) {
 
     case AXI_WRITE_ACK_W:
       if (!cpu_axi_get_ram_cpu_wvalid()) {
+        const uint32_t offset = strobe_offset(write_strobe);
         cpu_axi_set_ram_wready(false);
         assert((write_addr & 0x3u) == 0u);
-        pmem_write(write_addr, write_data, write_strobe, true);
+
+        /* pmem_write() is a legacy aligned helper that expects the selected
+         * byte/halfword in the low bits. AXI WDATA itself remains lane-correct.
+         */
+        pmem_write(write_addr, write_data >> (offset * 8u), write_strobe, true);
         cpu_axi_set_ram_bvalid(true);
         write_state = AXI_WRITE_WAIT_BREADY;
       }
