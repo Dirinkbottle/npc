@@ -1,16 +1,17 @@
 module ControlStatusRegister(
     input wire clk,
     input wire rst,
+    input wire en,//总的启用使能信号 不影响复位
     input wire [11:0] csr_addr,
     input wire [4:0] rs1,
-    input wire [31:0] rs1_val,//csrrw csrrs csrrc需要
+    input wire [31:0] rs1_value,// CSRRW/CSRRS/CSRRC 需要
     input wire [31:0] trap_pc,//当前pc值
-    input wire [4:0] zimm,//后续零扩展
+    input wire [4:0] csr_zimm,//后续零扩展
     input wire [7:0]  csr_op,
-    output wire csr_change_pc,
-    output wire [31:0] change_pc_value,
-    // 给外部读出来的csr值
-    output wire [31:0] csr_data
+    output wire csr_pc_change_request,
+    output wire [31:0] csr_target_pc,
+    // 给外部读出来的 CSR 值
+    output wire [31:0] csr_read_data
 );
 
 
@@ -27,12 +28,17 @@ module ControlStatusRegister(
     localparam MRET = 8'd7;
     localparam ECALL = 8'd8;
 
-    wire [31:0] csr_old = csr_register[csr_addr];
-    assign csr_change_pc = (csr_op==MRET)?1'b1:
+    reg [31:0] csr_old;
+
+    always @(*) begin
+            csr_old = csr_register[csr_addr];
+    end
+
+    assign csr_pc_change_request = (csr_op==MRET)?1'b1:
                             (csr_op==ECALL)?1'b1:
                             1'b0;
-    assign csr_data = csr_old;
-    wire [31:0] csr_zimm_zx = {{27'b0},zimm};
+    assign csr_read_data = csr_old;
+    wire [31:0] csr_zimm_zero_extended = {{27'b0},csr_zimm};
     reg [31:0] csr_register [0:4095];
 
     // 预制值（只读别名，用连续赋值跟随寄存器内容）
@@ -46,19 +52,19 @@ module ControlStatusRegister(
     wire [31:0] mip       = csr_register[836];
 
     wire is_ecall = (csr_op == ECALL);
-    // assign change_pc_value = (csr_op == ECALL) ? mtvec :
+    // assign csr_target_pc = (csr_op == ECALL) ? mtvec :
     //                          (csr_op == MRET)  ? mepc  :
     //                                               32'b0;
-    assign change_pc_value = is_ecall ? mtvec :
+    assign csr_target_pc = is_ecall ? mtvec :
                              (csr_op == MRET)  ? mepc  :
                                                   32'b0;
 
-    // mstatus中的分割字段
-    wire MSTATUS_MIE  = mstatus[3];
-    wire MSTATUS_MPIE = mstatus[7];
-    wire [1:0] MSTATUS_MPP = mstatus[12:11];
+    // mstatus 中的分段字段
+    wire mstatus_mie  = mstatus[3];
+    wire mstatus_mpie = mstatus[7];
+    wire [1:0] mstatus_mpp = mstatus[12:11];
     
-    wire csr_write_enable = (csr_op==CSRRW)?1'b1:
+    wire csr_write_enable = en & (csr_op==CSRRW)?1'b1:
                             (csr_op==CSRRS)?1'b1:
                             (csr_op==CSRRC)?1'b1:
                             (csr_op==CSRRWI)?1'b1:
@@ -67,10 +73,10 @@ module ControlStatusRegister(
                             (csr_op==MRET)?1'b1:
                             (csr_op==ECALL)?1'b1:
                             1'b0;
-    wire system_csr_write_enable = (csr_op==MRET)?1'b1:
+    wire system_csr_write_enable = en & (csr_op==MRET)?1'b1:
                                    (csr_op==ECALL)?1'b1:
                                    1'b0;
-    wire general_csr_write_enable = (csr_op==CSRRW)?1'b1: 
+    wire general_csr_write_enable = en & (csr_op==CSRRW)?1'b1: 
                                     (csr_op==CSRRS)?1'b1:
                                     (csr_op==CSRRC)?1'b1:
                                     (csr_op==CSRRWI)?1'b1:
@@ -87,12 +93,12 @@ module ControlStatusRegister(
         .default_out (32'b0),
         .key         (csr_op),
         .lut         ({
-            CSRRW,   rs1_val,
-            CSRRS,   rs1_val | csr_old,
-            CSRRC,   csr_old & (~rs1_val),
-            CSRRWI,   csr_zimm_zx,
-            CSRRSI,   csr_zimm_zx | csr_old,
-            CSRRCI,   csr_old & (~csr_zimm_zx)
+            CSRRW,   rs1_value,
+            CSRRS,   rs1_value | csr_old,
+            CSRRC,   csr_old & (~rs1_value),
+            CSRRWI,   csr_zimm_zero_extended,
+            CSRRSI,   csr_zimm_zero_extended | csr_old,
+            CSRRCI,   csr_old & (~csr_zimm_zero_extended)
         }),
         .out         (general_csr_write_data)
     );
@@ -125,19 +131,19 @@ module ControlStatusRegister(
             if (system_csr_write_enable) begin
                 if (csr_op == ECALL) begin
                     csr_register[833] <= trap_pc;
-                    // mstatus: MPP <= 2'b11, MPIE <= MIE, MIE <= 0
+                    // mstatus：MPP <= 2'b11，MPIE <= MIE，MIE <= 0
                     csr_register[768] <= {csr_register[768][31:13], 2'b11,
                                             csr_register[768][10:8],
                                             csr_register[768][3],
                                             csr_register[768][6:4],
                                             1'b0,
                                             csr_register[768][2:0]};
-                    // mcause
+                    // mcause 异常原因
                     csr_register[834] <= 32'd11;
                 end
 
                 if (csr_op == MRET) begin
-                    // mstatus: MIE <= MPIE, MPIE <= 1, MPP <= 2'b00
+                    // mstatus：MIE <= MPIE，MPIE <= 1，MPP <= 2'b00
                     csr_register[768] <= {csr_register[768][31:13], 2'b00,
                                             csr_register[768][10:8],
                                             1'b1,

@@ -31,8 +31,8 @@ module adder_64 (
     );
 
     // 计算补码加法溢出
-    // overflow = cout_last ^ cout_second
-    // cout_second
+    // 溢出 = 最高位进位 ^ 次高位进位
+    // 次高位进位
     assign overflow = cout_pair[1] ^ cout_pair[0];
     // 向最高位进位
     assign cout = cout_pair[0];
@@ -74,11 +74,11 @@ module shifter (
     input wire [63:0] source_data,
     input wire [5:0] shift,
     input wire [1:0] op,
-    output wire [63:0] outdata
+    output wire [63:0] result
 );
-// sllu sll srlu srl
+// sllu/sll/srlu/srl 移位指令
 
-    reg [63:0] real_shit_source;
+    reg [63:0] real_shift_source;
     wire [63:0] s0;
     wire [63:0] s1;
     wire [63:0] s2;
@@ -105,33 +105,33 @@ module shifter (
     always @(*) begin
         if (~right_direction) begin
             for ( i= 0;i<64 ; i=i+1) begin
-            real_shit_source[63-i] = source_data[i];
+            real_shift_source[63-i] = source_data[i];
             end
         end else begin
-            real_shit_source = source_data;
+            real_shift_source = source_data;
         end
     end
 
-    assign s0 = shift[0] ? {{1{padding}},real_shit_source[63:1] } : real_shit_source;
+    assign s0 = shift[0] ? {{1{padding}},real_shift_source[63:1] } : real_shift_source;
     assign s1 = shift[1] ? {{2{padding}},s0[63:2] } : s0;
     assign s2 = shift[2] ? {{4{padding}},s1[63:4] } : s1;
     assign s3 = shift[3] ? {{8{padding}},s2[63:8] } : s2;
     assign s4 = shift[4] ? {{16{padding}},s3[63:16] } : s3;
     assign s5 = shift[5] ? {{32{padding}},s4[63:32] } : s4;
 
-    reg [63:0] tmp_shit_result;
+    reg [63:0] tmp_shift_result;
     integer j;
     always @(*) begin
         if (~right_direction) begin
             for ( j= 0;j<64 ; j=j+1) begin
-              tmp_shit_result[63-j] = s5[j];
+              tmp_shift_result[63-j] = s5[j];
             end
         end else begin
-            tmp_shit_result= s5;
+            tmp_shift_result= s5;
         end
     end
 
-    assign outdata = tmp_shit_result;
+    assign result = tmp_shift_result;
 endmodule
 
 
@@ -172,13 +172,13 @@ module alu (
     // 后期把op合并
     input wire [1:0] shifter_op,
     input wire [1:0] compare_op,
-    output wire [63:0] outdata,
+    output wire [63:0] result,
     output wire sub_carry,
     output wire overflow,
     // 目前仅代表adder的结果
     output wire zero,
-    // 置位结果,目前给比较器用
-    output wire sz,
+    // 比较结果置位：比较条件成立时为 1，供 SLT/BLT/BGE 等使用
+    output wire zero_set,
     // 表示最高位是否进位 
     output wire cout
 );
@@ -240,7 +240,7 @@ module alu (
     wire [63:0] compare_real_data2;
  
  
-    // compare real_data2 选择
+    // 比较器的真实第二个操作数选择
     MuxWithDefault 
     #(
         .NR(4),
@@ -310,7 +310,7 @@ module alu (
         // RV32I寄存器移位只使用rs2的低5位；最高位补0以适配64位移位器接口。
         .shift       ({1'b0, data2[4:0]}),
         .op          (shifter_op          ),
-        .outdata     (shifter_out     )
+        .result     (shifter_out     )
     );
 
     bitwise_xor u_bitwise_xor(
@@ -341,7 +341,7 @@ module alu (
         .compare_op        (compare_op        ),
         .sub_carry_compare (sub_carry ),
         .overflow_compare  (adder_overflow  ),
-        .result            (sz            )
+        .result            (zero_set            )
     );
 
     
@@ -358,13 +358,13 @@ module alu (
             SUB,adder_sum,
             SHIFT,shifter_out,
             // 比较器结果写入bit 0，供SLT/SLTU写回rd。
-            COMPARE,{{63{1'b0}}, sz},
+            COMPARE,{{63{1'b0}}, zero_set},
             XOR_OP,xor_out,
             OR_OP,or_out,
             AND_OP,and_out,
             REVERSE,reverse_out
         } ),
-        .out (outdata ),
+        .out (result ),
         .default_out(64'b0)
     );
     

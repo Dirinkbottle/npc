@@ -1,6 +1,8 @@
 #include "memory.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,13 +40,32 @@ static uint32_t pmem_high(void) {
   return PMEM_BASE + (uint32_t)PMEM_SIZE - 1u;
 }
 
+static void print_byte_mask(uint8_t byte_mask) {
+  printf("byte_mask=0b");
+  for (int i = 7; i >= 0; i--) {
+    putchar((byte_mask & (1u << i)) ? '1' : '0');
+  }
+}
+
 static uint32_t mask_to_width(uint8_t byte_mask) {
   switch (byte_mask) {
-    case 0x01u: return 1u;
-    case 0x03u: return 2u;
-    case 0x0fu: return 4u;
+    case 0x01u:
+    case 0x02u:
+    case 0x04u:
+    case 0x08u:
+      return 1u;
+
+    case 0x03u:
+    case 0x0cu:
+      return 2u;
+
+    case 0x0fu:
+      return 4u;
+
     default:
-      printf(FMT_RED "invalid memory mask 0x%02x" FMT_NONE "\n", byte_mask);
+      printf(FMT_RED "invalid memory mask 0x%02x (" FMT_NONE, byte_mask);
+      print_byte_mask(byte_mask);
+      printf(FMT_RED ")" FMT_NONE "\n");
       sim_abort();
       return 0u;
   }
@@ -244,14 +265,50 @@ void add_mmio_map(const char *name, uint32_t start, uint32_t size,
       .handler = handler,
   };
 }
+static uint32_t mask_to_offset(uint8_t byte_mask) {
+  switch (byte_mask) {
+    case 0x01u: return 0u;  // 0001
+    case 0x02u: return 1u;  // 0010
+    case 0x04u: return 2u;  // 0100
+    case 0x08u: return 3u;  // 1000
 
-void pmem_write(uint32_t waddr, uint32_t wdata, char byte_mask,
+    case 0x03u: return 0u;  // 0011
+    case 0x0cu: return 2u;  // 1100
+
+    case 0x0fu: return 0u;  // 1111
+
+    default:
+      printf(FMT_RED "invalid memory mask 0x%02x (" FMT_NONE, byte_mask);
+      print_byte_mask(byte_mask);
+      printf(FMT_RED ")" FMT_NONE "\n");
+      sim_abort();
+      return 0u;
+  }
+}
+void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
                 bool skip_difftest_one) {
-  const uint32_t width = mask_to_width((uint8_t)byte_mask);
+
+  byte_mask &= 0x0fu;
+
+  const uint32_t width  = mask_to_width((uint8_t)byte_mask);
+  const uint32_t offset = mask_to_offset((uint8_t)byte_mask);
+
   if (width == 0u) {
     return;
   }
-  const uint32_t addr = aligned_addr(waddr, width);
+
+  // 总线给出的地址必须 4B 对齐
+  if ((waddr & 0x3u) != 0) {
+    printf(FMT_RED "unaligned memory write at 0x%08x (width=%u) " FMT_NONE,
+           waddr, width);
+    print_byte_mask((uint8_t)byte_mask);
+    printf("\n");
+    sim_abort();
+    return;
+  }
+
+  // 根据 byte mask 定位实际 byte 地址
+  const uint32_t addr = waddr + offset;
 
   if (ram != NULL && range_inside(addr, width, PMEM_BASE, pmem_high())) {
     store_le(ram + addr - PMEM_BASE, width, wdata);
@@ -260,6 +317,7 @@ void pmem_write(uint32_t waddr, uint32_t wdata, char byte_mask,
   }
 
   MemoryRegion *map = find_mmio(addr, width);
+
   if (map != NULL) {
     mmio_write(map, addr, width, wdata, skip_difftest_one);
     return;
@@ -267,27 +325,101 @@ void pmem_write(uint32_t waddr, uint32_t wdata, char byte_mask,
 
   printf(FMT_RED "invalid memory write at 0x%08x" FMT_NONE
                  " (width=%u, data=0x%08x, pc=0x%08x)\n",
-         waddr, width, wdata, last_pc);
+         addr, width, wdata, last_pc);
+
   sim_abort();
 }
 
-uint32_t prom_read(uint32_t rom_addr) {
-  if (ram == NULL || !range_inside(rom_addr, 4u, PMEM_BASE, pmem_high())) {
-    printf(FMT_RED "instruction fetch outside PMEM at pc=0x%08x" FMT_NONE "\n",
-           rom_addr);
-    sim_abort();
-    return 0u;
+typedef enum{
+  IDLE=1,WAIT_ARVALID,WAIT_RREADY
+} axi_enum;
+axi_enum axi_rom_state=IDLE;
+
+uint32_t random_cycle_to_wait =0;
+
+uint32_t rom_addr;
+axi_enum axi_ram_state = IDLE;
+uint32_t ram_addr;
+uint32_t ram_random_cycle_to_wait = 0;
+bool rom_already_give_data=false;
+bool ram_already_give_data=false;
+
+void prom_read() {
+  if (random_cycle_to_wait==0 || random_cycle_to_wait>=3) {
+    random_cycle_to_wait = random() % 3;
   }
-  last_pc = rom_addr;
-  return load_le(ram + rom_addr - PMEM_BASE, 4u);
+
+  switch (axi_rom_state) {
+    case IDLE:
+      axi_rom_state = WAIT_ARVALID;
+      cpu_axi_set_rom_rvalid(0);
+      cpu_axi_set_rom_rdata(0);
+      cpu_axi_set_rom_arready(0);
+    break;
+    case WAIT_ARVALID:
+      bool arvalid = cpu_axi_get_rom_cpu_arvalid();
+      
+      if(arvalid) {
+        
+        if (--random_cycle_to_wait == 0) {
+          cpu_axi_set_rom_arready(1);
+          rom_addr= cpu_axi_get_rom_cpu_araddr();
+          axi_rom_state = WAIT_RREADY;  
+        }
+        
+
+      }
+      
+    break;
+    case WAIT_RREADY:{
+        if ((rom_addr & 3u) != 0u) {
+          printf(FMT_RED "unaligned instruction fetch at 0x%08x" FMT_NONE "\n",
+                 rom_addr);
+          sim_abort();
+          assert(0);
+        }
+        if (ram == NULL || !range_inside(rom_addr, 4u, PMEM_BASE, pmem_high())) {
+          printf(FMT_RED "instruction fetch outside PMEM at pc=0x%08x" FMT_NONE "\n",
+                rom_addr);
+          sim_abort();
+          assert(0);
+          // return 0u;
+        }
+        if (--random_cycle_to_wait == 0 && !rom_already_give_data) {
+          last_pc = cpu_current_pc();
+          uint32_t rdata= load_le(ram + rom_addr - PMEM_BASE, 4u);
+          cpu_axi_set_rom_rdata(rdata);
+          rom_already_give_data=true;      
+          cpu_axi_set_rom_rvalid(1);
+        }
+        
+        bool rready = cpu_axi_get_rom_cpu_rready();
+        if (rready && rom_already_give_data) {
+          rom_already_give_data =false;
+          cpu_axi_set_rom_arready(0);
+          cpu_axi_set_rom_rvalid(0);
+          axi_rom_state = IDLE;
+        }
+
+    }
+    break;
+    default:
+      printf("AXI ROM should be initialed!\n");
+      assert(0);
+    break;
+  }
+
+  
+  return;
 }
 
-uint32_t pmem_read(uint32_t raddr, unsigned char byte_mask,
-                   bool skip_difftest_one) {
+static uint32_t pmem_read_data(uint32_t raddr, unsigned char byte_mask,
+                               bool skip_difftest_one) {
   const uint32_t width = mask_to_width(byte_mask);
   if (width == 0u) {
     return 0u;
   }
+
   const uint32_t addr = aligned_addr(raddr, width);
 
   if (ram != NULL && range_inside(addr, width, PMEM_BASE, pmem_high())) {
@@ -306,4 +438,61 @@ uint32_t pmem_read(uint32_t raddr, unsigned char byte_mask,
          raddr, width, last_pc);
   sim_abort();
   return 0u;
+}
+
+// 和 prom_read 相同的 AXI-Lite 状态机，只是驱动 RAM 侧信号。
+void pmem_read() {
+  if (ram_random_cycle_to_wait == 0 || ram_random_cycle_to_wait >= 3) {
+    ram_random_cycle_to_wait = random() % 3;
+  }
+
+  switch (axi_ram_state) {
+    case IDLE:
+      axi_ram_state = WAIT_ARVALID;
+      cpu_axi_set_ram_rvalid(0);
+      cpu_axi_set_ram_rdata(0);
+      cpu_axi_set_ram_arready(0);
+    break;
+    case WAIT_ARVALID: {
+      bool arvalid = cpu_axi_get_ram_cpu_arvalid();
+
+      if (arvalid) {
+        if (--ram_random_cycle_to_wait == 0) {
+          cpu_axi_set_ram_arready(1);
+          ram_addr = cpu_axi_get_ram_cpu_araddr();
+          axi_ram_state = WAIT_RREADY;
+        }
+      }
+    }
+    break;
+    case WAIT_RREADY: {
+      if ((ram_addr & 3u) != 0u) {
+        printf(FMT_RED "unaligned RAM read at 0x%08x " FMT_NONE, ram_addr);
+        print_byte_mask(0x0fu);
+        printf("\n");
+        sim_abort();
+        assert(0);
+      }
+      if (--ram_random_cycle_to_wait == 0 && !ram_already_give_data) {
+        last_pc = cpu_current_pc();
+        uint32_t rdata = pmem_read_data(ram_addr, 0x0fu, true);
+        cpu_axi_set_ram_rdata(rdata);
+        ram_already_give_data = true;
+        cpu_axi_set_ram_rvalid(1);
+      }
+
+      bool rready = cpu_axi_get_ram_cpu_rready();
+      if (rready && ram_already_give_data) {
+        ram_already_give_data =false;
+        axi_ram_state = IDLE;
+      }
+    }
+    break;
+    default:
+      printf("AXI RAM should be initialed!\n");
+      assert(0);
+    break;
+  }
+
+  return;
 }

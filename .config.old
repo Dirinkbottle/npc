@@ -6,14 +6,14 @@
 #
 # Difftest
 #
-CONFIG_DIFFTEST=y
+# CONFIG_DIFFTEST is not set
 # end of Difftest
 
 #
 # Build options
 #
-# CONFIG_BUILD_DEBUG is not set
-CONFIG_BUILD_RELEASE=y
+CONFIG_BUILD_DEBUG=y
+# CONFIG_BUILD_RELEASE is not set
 # end of Build options
 
 #
@@ -23,5 +23,5 @@ CONFIG_ITRACE=y
 CONFIG_MTRACE=y
 CONFIG_DTRACE=y
 CONFIG_FTRACE=y
-# CONFIG_DUMP_WAVE is not set
+CONFIG_DUMP_WAVE=y
 # end of Trace

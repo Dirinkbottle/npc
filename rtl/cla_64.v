@@ -76,14 +76,14 @@ module cla_64 (
         .OPG    (   TMP_PG[15:12] ),
         .OGG    (   TMP_GG[15:12] )
     );
-    // longmax < -1  overflow=1; sum = 10000000000000....; false sign=1
-    // 1 <   -1  2  . overflow=0;  false sign=0 false
-    // -1<1  -> -2  ; true sign=1 true
+    // 正最大值 < -1：overflow=1；和=10000000000000...；错误符号=1
+    // 1 < -1 得 2：overflow=0；错误符号=0（正确）
+    // -1<1 得 -2：真符号=1（正确）
     assign zero = ~(|sum);
     assign cout = tmp_cout[63 -:2];
 
-    // A-B(低n位) =(  2^n +(A-B)  )取低N位    A>B Cout_last =1 无借位     A<B cout_last = 1  有借位  翻译过来不够减必然小于2^n   如果a>b必然>2^n就必然有进位.cout=1-> borrow=0 ->a不小于b
-    // 减法是否借位   外部用cin 表示是否做减法
+    // A-B（低 n 位）=(2^n + (A-B)) 取低 N 位。A>B 时 Cout_last=1 无借位；A<B 时 cout_last=1 有借位。翻译过来：不够减必然小于 2^n；如果 a>b 必然 >2^n 就必然有进位，cout=1 -> borrow=0 -> a 不小于 b
+    // 减法是否借位；外部用 cin 表示是否做减法
     assign sub_carry = cin &  ~tmp_cout[63];
     
 endmodule

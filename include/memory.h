@@ -25,10 +25,9 @@ void add_mmio_map(const char *name, uint32_t start, uint32_t size,
                   uint8_t *space, memory_handler_t handler);
 
 /* DPI-C entry points imported by the RTL. */
-uint32_t pmem_read(uint32_t raddr, unsigned char byte_mask,
-                   bool skip_difftest_one);
-void pmem_write(uint32_t waddr, uint32_t wdata, char byte_mask,
+void pmem_read();
+void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
                 bool skip_difftest_one);
-uint32_t prom_read(uint32_t rom_addr);
+void prom_read();
 
 #endif

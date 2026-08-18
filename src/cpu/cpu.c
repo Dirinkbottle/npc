@@ -13,6 +13,7 @@
 
 static SimState sim_state = SIM_STOP;
 static int exit_good = 0;
+uint64_t cpu_total_cycle = 0;
 
 void set_npc_state(SimState state) {
   sim_state = state;
@@ -62,6 +63,78 @@ bool cpu_csr_write(uint32_t index, uint32_t value) {
   return rtl_bridge_csr_write(index, value);
 }
 
+bool cpu_axi_set_rom_arready(bool value) {
+  return rtl_bridge_set_axi_rom_arready(value);
+}
+
+bool cpu_axi_set_rom_rvalid(bool value) {
+  return rtl_bridge_set_axi_rom_rvalid(value);
+}
+
+bool cpu_axi_set_rom_rdata(uint32_t data) {
+  return rtl_bridge_set_axi_rom_rdata(data);
+}
+
+bool cpu_axi_get_rom_arready(void) {
+  return rtl_bridge_get_axi_rom_arready();
+}
+
+bool cpu_axi_get_rom_rvalid(void) {
+  return rtl_bridge_get_axi_rom_rvalid();
+}
+
+uint32_t cpu_axi_get_rom_rdata(void) {
+  return rtl_bridge_get_axi_rom_rdata();
+}
+
+bool cpu_axi_get_rom_cpu_arvalid(void) {
+  return rtl_bridge_get_axi_rom_cpu_arvalid();
+}
+
+bool cpu_axi_get_rom_cpu_rready(void) {
+  return rtl_bridge_get_axi_rom_cpu_rready();
+}
+
+uint32_t cpu_axi_get_rom_cpu_araddr(void) {
+  return rtl_bridge_get_axi_rom_cpu_araddr();
+}
+
+bool cpu_axi_set_ram_arready(bool value) {
+  return rtl_bridge_set_axi_ram_arready(value);
+}
+
+bool cpu_axi_set_ram_rvalid(bool value) {
+  return rtl_bridge_set_axi_ram_rvalid(value);
+}
+
+bool cpu_axi_set_ram_rdata(uint32_t data) {
+  return rtl_bridge_set_axi_ram_rdata(data);
+}
+
+bool cpu_axi_get_ram_arready(void) {
+  return rtl_bridge_get_axi_ram_arready();
+}
+
+bool cpu_axi_get_ram_rvalid(void) {
+  return rtl_bridge_get_axi_ram_rvalid();
+}
+
+uint32_t cpu_axi_get_ram_rdata(void) {
+  return rtl_bridge_get_axi_ram_rdata();
+}
+
+bool cpu_axi_get_ram_cpu_arvalid(void) {
+  return rtl_bridge_get_axi_ram_cpu_arvalid();
+}
+
+bool cpu_axi_get_ram_cpu_rready(void) {
+  return rtl_bridge_get_axi_ram_cpu_rready();
+}
+
+uint32_t cpu_axi_get_ram_cpu_araddr(void) {
+  return rtl_bridge_get_axi_ram_cpu_araddr();
+}
+
 void ebreak(void) {
   uint32_t a0 = 0;
   (void)cpu_reg_read(10u, &a0);
@@ -85,11 +158,12 @@ static void exec_once(bool view_trace) {
     itrace_print(pc, inst);
   }
 
-  if (rtl_bridge_invalid()) {
-    printf(FMT_RED "Invalid instruction at pc 0x%08x" FMT_NONE "\n", pc);
-    sim_abort();
-    return;
-  }
+  // TODO: 目前测试axi总线暂时关闭
+  // if (rtl_bridge_invalid()) {
+  //   printf(FMT_RED "Invalid instruction at pc 0x%08x" FMT_NONE "\n", pc);
+  //   sim_abort();
+  //   return;
+  // }
 
   /* Rising edge commits the architectural instruction. */
   rtl_bridge_set_clock(true);
@@ -109,9 +183,20 @@ static void exec_once(bool view_trace) {
   }
 }
 
+static void cpu_update_total_cycle(void) {
+  uint32_t mcycle = 0;
+  uint32_t mcycleh = 0;
+  if (!cpu_csr_read(0xb00u, &mcycle) ||
+      !cpu_csr_read(0xb80u, &mcycleh)) {
+    return;
+  }
+  cpu_total_cycle = ((uint64_t)mcycleh << 32) | mcycle;
+}
+
 void cpu_exec(uint64_t n) {
   const bool view_trace = n < 10u && n > 0u;
   if (sim_state == SIM_END || sim_state == SIM_ABORT || sim_state == SIM_QUIT) {
+    cpu_update_total_cycle();
     return;
   }
 
@@ -120,6 +205,8 @@ void cpu_exec(uint64_t n) {
     exec_once(view_trace);
     n--;
   }
+
+  cpu_update_total_cycle();
 
   if (sim_is_running()) {
     sim_state = SIM_STOP;

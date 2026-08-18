@@ -35,6 +35,10 @@ void output_marchid(){
   return;
 }
 
+void output_cycles(void) {
+  printf("total cycles = %llu\n", (unsigned long long)cpu_total_cycle);
+}
+
 int main(int argc, char **argv) {
   // 注册ctrl_c信号捕获
 
@@ -92,8 +96,12 @@ int main(int argc, char **argv) {
   }
 #endif
 
+  // 输出运行的总周期数
+  output_cycles();
+
   destroy_simulator();
   destroy_ftrace();
   destroy_memory();
+  
   return sim_exit_code();
 }

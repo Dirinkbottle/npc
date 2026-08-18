@@ -1,86 +1,126 @@
-.text
+.section .text
 .globl _start
+.option norvc
 
-# 简单 Zicsr 扩展测试。
-# 使用 mscratch 作为可读写的临时 CSR，初始值为 0。
-# 假设 I/B/J 类跳转指令已经正确，任何一项检查失败都会：
-#   a0 = -1
-#   ebreak
-# 全部通过时：
-#   a0 = 0
-#   ebreak
 _start:
-    # csrrwi: 旧值为 0，写入 0x15
-    csrrwi t0, mscratch, 0x15
-    bnez   t0, fail
+    # 测试地址 0x80001000
+    lui  x1, 0x80001
 
-    # csrrsi: 旧值 0x15，置位 0x03 -> 0x17
-    li     t0, 0x15
-    csrrsi t1, mscratch, 0x03
-    bne    t1, t0, fail
+    # 写入 0x84838281
+    #
+    # little endian:
+    # +0 = 0x81
+    # +1 = 0x82
+    # +2 = 0x83
+    # +3 = 0x84
+    lui  x3, 0x84838
+    addi x3, x3, 0x281
+    sw   x3, 0(x1)
 
-    # csrrci: 旧值 0x17，清位 0x02 -> 0x15
-    li     t0, 0x17
-    csrrci t2, mscratch, 0x02
-    bne    t2, t0, fail
 
-    # 检查 csrrci 后的 CSR 值为 0x15
-    li     t0, 0x15
-    csrr   t3, mscratch
-    bne    t3, t0, fail
+    # ============================================================
+    # LBU lane 0
+    # ============================================================
+    lbu  x4, 0(x1)
+    addi x5, x0, 0x81
+    bne  x4, x5, fail10
 
-    # csrrw: 旧值 0x15，写入 0x2a
-    li     t4, 0x2a
-    csrrw  t5, mscratch, t4
-    li     t0, 0x15
-    bne    t5, t0, fail
 
-    # 检查 csrrw 后的 CSR 值为 0x2a
-    csrr   t3, mscratch
-    bne    t3, t4, fail
+    # ============================================================
+    # LBU lane 1
+    # ============================================================
+    lbu  x4, 1(x1)
+    addi x5, x0, 0x82
+    bne  x4, x5, fail11
 
-    # csrrs: 旧值 0x2a，置位 0x11 -> 0x3b
-    li     t6, 0x11
-    csrrs  t5, mscratch, t6
-    li     t0, 0x2a
-    bne    t5, t0, fail
 
-    # 检查 csrrs 后的 CSR 值为 0x3b
-    or     t0, t4, t6
-    csrr   t3, mscratch
-    bne    t3, t0, fail
+    # ============================================================
+    # LBU lane 2
+    # ============================================================
+    lbu  x4, 2(x1)
+    addi x5, x0, 0x83
+    bne  x4, x5, fail12
 
-    # csrrc: 旧值 0x3b，清位 0x0a -> 0x31
-    li     t6, 0x0a
-    csrrc  t5, mscratch, t6
-    bne    t5, t0, fail
 
-    # 检查 csrrc 后的 CSR 值为 0x3b & ~0x0a
-    xori   t6, t6, -1
-    and    t0, t0, t6
-    csrr   t3, mscratch
-    bne    t3, t0, fail
+    # ============================================================
+    # LBU lane 3
+    # ============================================================
+    lbu  x4, 3(x1)
+    addi x5, x0, 0x84
+    bne  x4, x5, fail13
 
-    # ecall / mret 测试。
-    # 将 mtvec 指向 ecall_handler，然后 ecall 进入 handler。
-    li     t0, 0x80000098
-    csrw   mtvec, t0
 
-    li     a0, 1
-    ecall
-    # 如果 ecall 没有正确跳转到 mtvec，则会执行到这里。
-    j      fail
+    # ============================================================
+    # LHU low halfword
+    #
+    # bytes:
+    #   81 82
+    #
+    # little endian = 0x8281
+    # ============================================================
+    lhu  x4, 0(x1)
 
-ecall_return:
-    # mret 应当返回到这里，此时 a0 = 1 - 1 = 0。
+    lui  x5, 0x8
+    addi x5, x5, 0x281       # 0x00008281
+
+    bne  x4, x5, fail20
+
+
+    # ============================================================
+    # LHU high halfword
+    #
+    # bytes:
+    #   83 84
+    #
+    # little endian = 0x8483
+    # ============================================================
+    lhu  x4, 2(x1)
+
+    lui  x5, 0x8
+    addi x5, x5, 0x483       # 0x00008483
+
+    bne  x4, x5, fail21
+
+
+    # ============================================================
+    # SUCCESS
+    # ============================================================
+    addi x10, x0, 0
     ebreak
 
-ecall_handler:
-    addi   a0, a0, -1
-    li     t0, 0x80000094
-    csrw   mepc, t0
-    mret
 
-fail:
-    li     a0, -1
+fail10:
+    addi x2, x0, 10          # LBU lane 0
+    csrrw x0, mscratch, x2
+    addi x10, x0, 1
+    ebreak
+
+fail11:
+    addi x2, x0, 11          # LBU lane 1
+    csrrw x0, mscratch, x2
+    addi x10, x0, 1
+    ebreak
+
+fail12:
+    addi x2, x0, 12          # LBU lane 2
+    csrrw x0, mscratch, x2
+    addi x10, x0, 1
+    ebreak
+
+fail13:
+    addi x2, x0, 13          # LBU lane 3
+    csrrw x0, mscratch, x2
+    addi x10, x0, 1
+    ebreak
+
+fail20:
+    addi x2, x0, 20          # LHU low
+    csrrw x0, mscratch, x2
+    addi x10, x0, 1
+    ebreak
+
+fail21:
+    addi x2, x0, 21          # LHU high
+    csrrw x0, mscratch, x2
+    addi x10, x0, 1
     ebreak
