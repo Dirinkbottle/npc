@@ -8,11 +8,10 @@
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 
-// prom_read()/pmem_read() 在 C 侧 (src/memory/memory.c) 实现，C++ 这里要按 C 符号链接。
 extern "C" void prom_read();
 extern "C" void pmem_read();
+extern "C" void pmem_write_axi();
 
-// 由 C 侧直接维护的时钟/复位状态，使用 extern "C" 保证符号名不被 C++ 改编。
 extern "C" {
 uint8_t cpu_clk = 0;
 uint8_t cpu_rst = 0;
@@ -37,14 +36,11 @@ void eval_impl() {
   }
   sync_clock_reset();
 
-
-  // 每次 eval 都驱动一次 C 侧 AXI 状态机。
   prom_read();
   pmem_read();
+  pmem_write_axi();
 
   top->eval();
-
-
 
 #ifdef CONFIG_DUMP_WAVE
   if (wave != nullptr) {
@@ -77,14 +73,12 @@ extern "C" bool rtl_bridge_init(int argc, char **argv) {
   }
 #endif
 
-  /* Synchronous reset for one complete clock cycle. */
   cpu_rst = 1;
   cpu_clk = 0;
   eval_impl();
   cpu_clk = 1;
   eval_impl();
 
-  /* Evaluate the first fetch without committing an instruction. */
   cpu_rst = 0;
   cpu_clk = 0;
   sync_clock_reset();
@@ -142,8 +136,7 @@ extern "C" bool rtl_bridge_csr_read(uint32_t index, uint32_t *value) {
   if (top == nullptr || value == nullptr || index >= 4096u) {
     return false;
   }
-  *value =
-      top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index];
+  *value = top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index];
   return true;
 }
 
@@ -151,111 +144,76 @@ extern "C" bool rtl_bridge_csr_write(uint32_t index, uint32_t value) {
   if (top == nullptr || index >= 4096u) {
     return false;
   }
-  top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index] =
-      value;
+  top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index] = value;
   return true;
 }
 
 extern "C" bool rtl_bridge_set_axi_rom_arready(bool value) {
-  if (top == nullptr) {
-    return false;
-  }
+  if (top == nullptr) return false;
   top->axi_rom_arready = value ? 1 : 0;
   return true;
 }
-
 extern "C" bool rtl_bridge_set_axi_rom_rvalid(bool value) {
-  if (top == nullptr) {
-    return false;
-  }
+  if (top == nullptr) return false;
   top->axi_rom_rvalid = value ? 1 : 0;
   return true;
 }
-
 extern "C" bool rtl_bridge_set_axi_rom_rdata(uint32_t data) {
-  if (top == nullptr) {
-    return false;
-  }
+  if (top == nullptr) return false;
   top->axi_rom_rdata = data;
   return true;
 }
-
-extern "C" bool rtl_bridge_get_axi_rom_arready(void) {
-  return top != nullptr && top->axi_rom_arready;
-}
-
-extern "C" bool rtl_bridge_get_axi_rom_rvalid(void) {
-  return top != nullptr && top->axi_rom_rvalid;
-}
-
-extern "C" uint32_t rtl_bridge_get_axi_rom_rdata(void) {
-  return top == nullptr ? 0u : top->axi_rom_rdata;
-}
-
-extern "C" bool rtl_bridge_get_axi_rom_cpu_arvalid(void) {
-  return top != nullptr && top->axi_cpu_rom_arvalid;
-}
-
-extern "C" bool rtl_bridge_get_axi_rom_cpu_rready(void) {
-  return top != nullptr && top->axi_cpu_rom_rready;
-}
-
-extern "C" uint32_t rtl_bridge_get_axi_rom_cpu_araddr(void) {
-  return top == nullptr ? 0u : top->axi_cpu_rom_araddr;
-}
+extern "C" bool rtl_bridge_get_axi_rom_arready(void) { return top != nullptr && top->axi_rom_arready; }
+extern "C" bool rtl_bridge_get_axi_rom_rvalid(void) { return top != nullptr && top->axi_rom_rvalid; }
+extern "C" uint32_t rtl_bridge_get_axi_rom_rdata(void) { return top == nullptr ? 0u : top->axi_rom_rdata; }
+extern "C" bool rtl_bridge_get_axi_rom_cpu_arvalid(void) { return top != nullptr && top->axi_cpu_rom_arvalid; }
+extern "C" bool rtl_bridge_get_axi_rom_cpu_rready(void) { return top != nullptr && top->axi_cpu_rom_rready; }
+extern "C" uint32_t rtl_bridge_get_axi_rom_cpu_araddr(void) { return top == nullptr ? 0u : top->axi_cpu_rom_araddr; }
 
 extern "C" bool rtl_bridge_set_axi_ram_arready(bool value) {
-  if (top == nullptr) {
-    return false;
-  }
+  if (top == nullptr) return false;
   top->axi_ram_arready = value ? 1 : 0;
   return true;
 }
-
 extern "C" bool rtl_bridge_set_axi_ram_rvalid(bool value) {
-  if (top == nullptr) {
-    return false;
-  }
+  if (top == nullptr) return false;
   top->axi_ram_rvalid = value ? 1 : 0;
   return true;
 }
-
 extern "C" bool rtl_bridge_set_axi_ram_rdata(uint32_t data) {
-  if (top == nullptr) {
-    return false;
-  }
+  if (top == nullptr) return false;
   top->axi_ram_rdata = data;
   return true;
 }
-
-extern "C" bool rtl_bridge_get_axi_ram_arready(void) {
-  return top != nullptr && top->axi_ram_arready;
+extern "C" bool rtl_bridge_set_axi_ram_awready(bool value) {
+  if (top == nullptr) return false;
+  top->axi_ram_awready = value ? 1 : 0;
+  return true;
+}
+extern "C" bool rtl_bridge_set_axi_ram_wready(bool value) {
+  if (top == nullptr) return false;
+  top->axi_ram_wready = value ? 1 : 0;
+  return true;
+}
+extern "C" bool rtl_bridge_set_axi_ram_bvalid(bool value) {
+  if (top == nullptr) return false;
+  top->axi_ram_bvalid = value ? 1 : 0;
+  return true;
 }
 
-extern "C" bool rtl_bridge_get_axi_ram_rvalid(void) {
-  return top != nullptr && top->axi_ram_rvalid;
-}
+extern "C" bool rtl_bridge_get_axi_ram_arready(void) { return top != nullptr && top->axi_ram_arready; }
+extern "C" bool rtl_bridge_get_axi_ram_rvalid(void) { return top != nullptr && top->axi_ram_rvalid; }
+extern "C" uint32_t rtl_bridge_get_axi_ram_rdata(void) { return top == nullptr ? 0u : top->axi_ram_rdata; }
+extern "C" bool rtl_bridge_get_axi_ram_cpu_arvalid(void) { return top != nullptr && top->axi_cpu_ram_arvalid; }
+extern "C" bool rtl_bridge_get_axi_ram_cpu_rready(void) { return top != nullptr && top->axi_cpu_ram_rready; }
+extern "C" uint32_t rtl_bridge_get_axi_ram_cpu_araddr(void) { return top == nullptr ? 0u : top->axi_cpu_ram_araddr; }
 
-extern "C" uint32_t rtl_bridge_get_axi_ram_rdata(void) {
-  return top == nullptr ? 0u : top->axi_ram_rdata;
-}
+extern "C" bool rtl_bridge_get_axi_ram_cpu_awvalid(void) { return top != nullptr && top->axi_ram_awvalid; }
+extern "C" uint32_t rtl_bridge_get_axi_ram_cpu_awaddr(void) { return top == nullptr ? 0u : top->axi_ram_awaddr; }
+extern "C" bool rtl_bridge_get_axi_ram_cpu_wvalid(void) { return top != nullptr && top->axi_ram_wvalid; }
+extern "C" uint32_t rtl_bridge_get_axi_ram_cpu_wdata(void) { return top == nullptr ? 0u : top->axi_ram_wdata; }
+extern "C" uint8_t rtl_bridge_get_axi_ram_cpu_wstrb(void) { return top == nullptr ? 0u : (uint8_t)top->axi_ram_wstrb; }
+extern "C" bool rtl_bridge_get_axi_ram_cpu_bready(void) { return top != nullptr && top->axi_ram_bready; }
 
-extern "C" bool rtl_bridge_get_axi_ram_cpu_arvalid(void) {
-  return top != nullptr && top->axi_cpu_ram_arvalid;
-}
-
-extern "C" bool rtl_bridge_get_axi_ram_cpu_rready(void) {
-  return top != nullptr && top->axi_cpu_ram_rready;
-}
-
-extern "C" uint32_t rtl_bridge_get_axi_ram_cpu_araddr(void) {
-  return top == nullptr ? 0u : top->axi_cpu_ram_araddr;
-}
-
-extern "C" bool rtl_bridge_get_mem_addr_read_unalign(void) {
-  return top != nullptr && top->mem_addr_read_unalign;
-}
-
-extern "C" bool rtl_bridge_get_mem_addr_write_unalign(void) {
-  return top != nullptr && top->mem_addr_write_unalign;
-}
+extern "C" bool rtl_bridge_get_mem_addr_read_unalign(void) { return top != nullptr && top->mem_addr_read_unalign; }
+extern "C" bool rtl_bridge_get_mem_addr_write_unalign(void) { return top != nullptr && top->mem_addr_write_unalign; }
