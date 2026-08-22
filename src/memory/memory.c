@@ -333,85 +333,10 @@ void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
 typedef enum{
   IDLE=1,WAIT_ARVALID,WAIT_RREADY
 } axi_enum;
-axi_enum axi_rom_state=IDLE;
-
-uint32_t random_cycle_to_wait =0;
-
-uint32_t rom_addr;
 axi_enum axi_ram_state = IDLE;
 uint32_t ram_addr;
 uint32_t ram_random_cycle_to_wait = 0;
-bool rom_already_give_data=false;
 bool ram_already_give_data=false;
-
-void prom_read() {
-  if (random_cycle_to_wait==0 || random_cycle_to_wait>=3) {
-    random_cycle_to_wait = random() % 3;
-  }
-
-  switch (axi_rom_state) {
-    case IDLE:
-      axi_rom_state = WAIT_ARVALID;
-      cpu_axi_set_rom_rvalid(0);
-      cpu_axi_set_rom_rdata(0);
-      cpu_axi_set_rom_arready(0);
-    break;
-    case WAIT_ARVALID:
-      bool arvalid = cpu_axi_get_rom_cpu_arvalid();
-      
-      if(arvalid) {
-        
-        if (--random_cycle_to_wait == 0) {
-          cpu_axi_set_rom_arready(1);
-          rom_addr= cpu_axi_get_rom_cpu_araddr();
-          axi_rom_state = WAIT_RREADY;  
-        }
-        
-
-      }
-      
-    break;
-    case WAIT_RREADY:{
-        if ((rom_addr & 3u) != 0u) {
-          printf(FMT_RED "unaligned instruction fetch at 0x%08x" FMT_NONE "\n",
-                 rom_addr);
-          sim_abort();
-          assert(0);
-        }
-        if (ram == NULL || !range_inside(rom_addr, 4u, PMEM_BASE, pmem_high())) {
-          printf(FMT_RED "instruction fetch outside PMEM at pc=0x%08x" FMT_NONE "\n",
-                rom_addr);
-          sim_abort();
-          assert(0);
-          // return 0u;
-        }
-        if (--random_cycle_to_wait == 0 && !rom_already_give_data) {
-          last_pc = cpu_current_pc();
-          uint32_t rdata= load_le(ram + rom_addr - PMEM_BASE, 4u);
-          cpu_axi_set_rom_rdata(rdata);
-          rom_already_give_data=true;      
-          cpu_axi_set_rom_rvalid(1);
-        }
-        
-        bool rready = cpu_axi_get_rom_cpu_rready();
-        if (rready && rom_already_give_data) {
-          rom_already_give_data =false;
-          cpu_axi_set_rom_arready(0);
-          cpu_axi_set_rom_rvalid(0);
-          axi_rom_state = IDLE;
-        }
-
-    }
-    break;
-    default:
-      printf("AXI ROM should be initialed!\n");
-      assert(0);
-    break;
-  }
-
-  
-  return;
-}
 
 static uint32_t pmem_read_data(uint32_t raddr, unsigned char byte_mask,
                                bool skip_difftest_one) {
@@ -440,10 +365,11 @@ static uint32_t pmem_read_data(uint32_t raddr, unsigned char byte_mask,
   return 0u;
 }
 
-// 和 prom_read 相同的 AXI-Lite 状态机，只是驱动 RAM 侧信号。
+// AXI-Lite 状态机，驱动 RAM 侧读写。
 void pmem_read() {
-  if (ram_random_cycle_to_wait == 0 || ram_random_cycle_to_wait >= 3) {
-    ram_random_cycle_to_wait = random() % 3;
+  if (ram_random_cycle_to_wait >= 1) {
+    // ram_random_cycle_to_wait = random() % 2;
+    ram_random_cycle_to_wait = 1;
   }
 
   switch (axi_ram_state) {
@@ -455,7 +381,6 @@ void pmem_read() {
     break;
     case WAIT_ARVALID: {
       bool arvalid = cpu_axi_get_ram_cpu_arvalid();
-
       if (arvalid) {
         if (--ram_random_cycle_to_wait == 0) {
           cpu_axi_set_ram_arready(1);

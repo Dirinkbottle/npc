@@ -8,7 +8,6 @@
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 
-extern "C" void prom_read();
 extern "C" void pmem_read();
 extern "C" void pmem_write_axi();
 
@@ -36,9 +35,10 @@ void eval_impl() {
   }
   sync_clock_reset();
 
-  prom_read();
-  pmem_read();
-  pmem_write_axi();
+  if (top->clk==1) {
+      pmem_read();
+      pmem_write_axi();
+  }
 
   top->eval();
 
@@ -147,28 +147,6 @@ extern "C" bool rtl_bridge_csr_write(uint32_t index, uint32_t value) {
   top->rootp->minirv__DOT__u_ControlStatusRegister__DOT__csr_register[index] = value;
   return true;
 }
-
-extern "C" bool rtl_bridge_set_axi_rom_arready(bool value) {
-  if (top == nullptr) return false;
-  top->axi_rom_arready = value ? 1 : 0;
-  return true;
-}
-extern "C" bool rtl_bridge_set_axi_rom_rvalid(bool value) {
-  if (top == nullptr) return false;
-  top->axi_rom_rvalid = value ? 1 : 0;
-  return true;
-}
-extern "C" bool rtl_bridge_set_axi_rom_rdata(uint32_t data) {
-  if (top == nullptr) return false;
-  top->axi_rom_rdata = data;
-  return true;
-}
-extern "C" bool rtl_bridge_get_axi_rom_arready(void) { return top != nullptr && top->axi_rom_arready; }
-extern "C" bool rtl_bridge_get_axi_rom_rvalid(void) { return top != nullptr && top->axi_rom_rvalid; }
-extern "C" uint32_t rtl_bridge_get_axi_rom_rdata(void) { return top == nullptr ? 0u : top->axi_rom_rdata; }
-extern "C" bool rtl_bridge_get_axi_rom_cpu_arvalid(void) { return top != nullptr && top->axi_cpu_rom_arvalid; }
-extern "C" bool rtl_bridge_get_axi_rom_cpu_rready(void) { return top != nullptr && top->axi_cpu_rom_rready; }
-extern "C" uint32_t rtl_bridge_get_axi_rom_cpu_araddr(void) { return top == nullptr ? 0u : top->axi_cpu_rom_araddr; }
 
 extern "C" bool rtl_bridge_set_axi_ram_arready(bool value) {
   if (top == nullptr) return false;

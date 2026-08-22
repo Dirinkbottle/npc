@@ -1,5 +1,6 @@
 #include "cpu.h"
 
+#include <stdint.h>
 #include <stdio.h>
 
 #include "color.h"
@@ -10,6 +11,7 @@
 #include "rtl_bridge.h"
 #include "sdb.h"
 #include "trace.h"
+#include "device.h"
 
 static SimState sim_state = SIM_STOP;
 static int exit_good = 0;
@@ -37,16 +39,6 @@ uint32_t cpu_current_pc(void) {
 bool cpu_reg_read(uint32_t index, uint32_t *value) { return rtl_bridge_reg_read(index, value); }
 bool cpu_csr_read(uint32_t index, uint32_t *value) { return rtl_bridge_csr_read(index, value); }
 bool cpu_csr_write(uint32_t index, uint32_t value) { return rtl_bridge_csr_write(index, value); }
-
-bool cpu_axi_set_rom_arready(bool value) { return rtl_bridge_set_axi_rom_arready(value); }
-bool cpu_axi_set_rom_rvalid(bool value) { return rtl_bridge_set_axi_rom_rvalid(value); }
-bool cpu_axi_set_rom_rdata(uint32_t data) { return rtl_bridge_set_axi_rom_rdata(data); }
-bool cpu_axi_get_rom_arready(void) { return rtl_bridge_get_axi_rom_arready(); }
-bool cpu_axi_get_rom_rvalid(void) { return rtl_bridge_get_axi_rom_rvalid(); }
-uint32_t cpu_axi_get_rom_rdata(void) { return rtl_bridge_get_axi_rom_rdata(); }
-bool cpu_axi_get_rom_cpu_arvalid(void) { return rtl_bridge_get_axi_rom_cpu_arvalid(); }
-bool cpu_axi_get_rom_cpu_rready(void) { return rtl_bridge_get_axi_rom_cpu_rready(); }
-uint32_t cpu_axi_get_rom_cpu_araddr(void) { return rtl_bridge_get_axi_rom_cpu_araddr(); }
 
 bool cpu_axi_set_ram_arready(bool value) { return rtl_bridge_set_axi_ram_arready(value); }
 bool cpu_axi_set_ram_rvalid(bool value) { return rtl_bridge_set_axi_ram_rvalid(value); }
@@ -86,19 +78,27 @@ static void exec_once(bool view_trace) {
 
   const uint32_t pc = rtl_bridge_pc();
   const uint32_t inst = rtl_bridge_inst();
-  itrace_record(pc, inst);
+  
+
   if (view_trace) {
     itrace_print(pc, inst);
   }
 
   rtl_bridge_set_clock(true);
-  rtl_bridge_eval();
+  rtl_bridge_eval(); //上升沿才有可能更新pc
+
+  uint32_t new_pc = rtl_bridge_pc();
+  if (new_pc!=pc) {
+    itrace_record(pc, inst);
+  }else {
+    // 是旧指令或者无效,跳过这条指令执行
+    difftest_skip_ref();
+  }
 
 #ifdef CONFIG_DIFFTEST
   difftest_step(pc, inst);
 #endif
   ftrace_step(pc, inst, cpu_current_pc());
-
   if (fbreakpoint_check(cpu_current_pc())) {
     set_npc_state(SIM_STOP);
   }
@@ -127,6 +127,7 @@ void cpu_exec(uint64_t n) {
   sim_state = SIM_RUNNING;
   while (n > 0 && sim_is_running()) {
     exec_once(view_trace);
+    device_update();
     n--;
   }
 

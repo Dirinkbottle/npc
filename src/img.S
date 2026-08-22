@@ -344,8 +344,6 @@ _start:
     addi   x2, x0, 55
     bne    x7, x6, fail
 
-    /* FENCE is implemented as a legal no-op in this core. */
-    fence
 
     /* ------------------------------------------------------------ */
     /* JALR: jump to a fixed section offset without linker relocs.  */

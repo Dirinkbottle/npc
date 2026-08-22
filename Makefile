@@ -36,7 +36,7 @@ CXXFLAGS := $(CXXFLAGS_DEBUG)
 LDFLAGS := $(LDFLAGS_DEBUG)
 endif
 
-LDLIBS := -lreadline -ldl
+LDLIBS := -lreadline -ldl $(shell sdl2-config --libs)
 SRC := $(shell find src backend -type d -path 'src/tools' -prune -o -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.S" \) -print)
 VSRC := $(shell find rtl -type f -name "*.v")
 CSRC :=$(filter %.c,$(SRC))

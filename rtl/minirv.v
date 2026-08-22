@@ -4,9 +4,6 @@
 module minirv (
     input wire clk,
     input wire rst,
-    input wire axi_rom_arready,
-    input wire axi_rom_rvalid,
-    input wire [31:0]axi_rom_rdata,
     input wire axi_ram_arready,
     input wire axi_ram_rvalid,
     input wire [31:0]axi_ram_rdata,
@@ -15,18 +12,15 @@ module minirv (
     input wire axi_ram_awready,
     output wire [31:0] axi_ram_awaddr,
     output wire axi_ram_awvalid,
-    output wire axi_cpu_rom_arvalid,
-    output wire axi_cpu_rom_rready,
-    output wire [31:0]axi_cpu_rom_araddr,
     output wire axi_cpu_ram_arvalid,
     output wire axi_cpu_ram_rready,
     output wire [31:0]axi_cpu_ram_araddr,
-    output wire mem_addr_read_unalign,
-    output wire mem_addr_write_unalign,
     output wire [31:0]axi_ram_wdata,
     output wire [3:0]axi_ram_wstrb,
     output wire axi_ram_wvalid,
     output wire axi_ram_bready,
+    output wire mem_addr_read_unalign,
+    output wire mem_addr_write_unalign,
     output wire [31:0] develop_put,
     output wire [63:0] alu_result,
     output wire alu_sub_carry,
@@ -50,6 +44,7 @@ module minirv (
     localparam CPU_EXCUTE = 8'd10;
     localparam CPU_DECODE = 8'd11;
     localparam CPU_WAIT_RAM_STORE_AW =8'd12 ;
+    localparam CPU_RAM_FETCHEDINST_IDLE =8'd13 ;
 
     reg [7:0] cpu_state;
     localparam PC_RESET = 32'h80000000;
@@ -57,15 +52,17 @@ module minirv (
     reg [31:0] pc;
     reg [31:0] inst;
     wire [31:0] pc_plus4;
+    
+    localparam BUS_NOTAKE = 8'd0;
+    localparam BUS_TAKEBY_IFU = 8'd1 ;
+    localparam BUS_TAKEBY_LSU = 8'd2 ;
+    wire [31:0] ram_araddr_arbitrate;
+    reg [7:0] axibus_take;
+    assign ram_araddr_arbitrate = (axibus_take == BUS_NOTAKE) ? 32'b0 :
+                                  (axibus_take == BUS_TAKEBY_IFU) ? pc :
+                                  (axibus_take == BUS_TAKEBY_LSU) ? mem_addr_word_aligned:32'b0;
 
-    wire [31:0]rom_araddr; assign axi_cpu_rom_araddr=rom_araddr; assign rom_araddr = pc;
-    reg rom_arvalid; assign axi_cpu_rom_arvalid = rom_arvalid;
-    wire rom_arready; assign rom_arready = axi_rom_arready;
-    wire rom_rvalid; assign rom_rvalid = axi_rom_rvalid;
-    wire [31:0]rom_rdata; assign rom_rdata = axi_rom_rdata;
-    reg rom_rready; assign axi_cpu_rom_rready = rom_rready;
-
-    wire [31:0]ram_araddr; assign axi_cpu_ram_araddr = ram_araddr; assign ram_araddr = mem_addr_word_aligned;
+    wire [31:0]ram_araddr; assign axi_cpu_ram_araddr = ram_araddr; assign ram_araddr = ram_araddr_arbitrate;
     reg ram_arvalid; assign axi_cpu_ram_arvalid = ram_arvalid;
     wire ram_arready; assign ram_arready = axi_ram_arready;
     wire ram_rvalid; assign ram_rvalid = axi_ram_rvalid;
@@ -78,73 +75,87 @@ module minirv (
     wire ram_wready; assign ram_wready = axi_ram_wready;
     wire ram_bvalid; assign ram_bvalid = axi_ram_bvalid;
     reg ram_bready; assign axi_ram_bready = ram_bready;
-    wire [31:0]ram_awaddr; assign axi_ram_awaddr = ram_awaddr; assign ram_awaddr = mem_addr_word_aligned;
+    wire [31:0]ram_awaddr; assign axi_ram_awaddr = ram_awaddr; assign ram_awaddr = ram_araddr_arbitrate;
     reg ram_awvalid; assign axi_ram_awvalid = ram_awvalid;
     wire ram_awready; assign ram_awready = axi_ram_awready;
     reg global_en;
 
-    reg store_act_success;
 
     always @(posedge clk) begin
         if (rst) begin
             cpu_state <= CPU_IDLE;
             pc <= PC_RESET;
             inst <= 32'b0;
-            rom_arvalid<=1'b0;
-            rom_rready<=1'b0;
             ram_arvalid<=1'b0;
             ram_rready<=1'b0;
             mem_read_data_nomask<=32'b0;
-            store_act_success<=1'b0;
             global_en <=1'b0;
             ram_wvalid<=1'b0;
             ram_bready<=1'b0;
             ram_awvalid<=1'b0;
+            axibus_take <= BUS_NOTAKE; //初始总线空闲
         end else begin
             if (cpu_state==CPU_IDLE) begin
                 global_en<=1'b0;
                 cpu_state<=CPU_FETCHINST;
-                inst<=32'b0;
+                axibus_take<=BUS_TAKEBY_IFU; // ifu控制总线
                 ram_bready<=1'b0;
             end else if(cpu_state==CPU_FETCHINST)begin
                 global_en<=1'b0;
                 cpu_state<=CPU_WAIT_AR;
-                rom_arvalid<=1'b1;
-                rom_rready <=1'b0;
+                ram_arvalid<=1'b1;
+                ram_rready <=1'b0;
             end else if(cpu_state==CPU_DECODE) begin
                 global_en<=1'b0;
                 if (is_load) begin
                     cpu_state<=CPU_RAM_LOAD_IDLE;
+                    axibus_take<=BUS_TAKEBY_LSU;
                 end else begin
                     cpu_state<=CPU_EXCUTE;
+                    global_en<=1'b1;
                 end
             end else if (cpu_state==CPU_EXCUTE) begin
-                global_en<=1'b1;
+                global_en<=1'b0;
                 if (is_store) begin
                     cpu_state <= CPU_RAM_STORE_IDLE;
+                    axibus_take<=BUS_TAKEBY_LSU;
                 end else begin
+                    inst<=32'b0;
                     cpu_state <= CPU_IDLE;
                 end
             end else if(cpu_state==CPU_WAIT_AR) begin
                 global_en<=1'b0;
-                if (rom_arvalid & rom_arready) begin
+                if (ram_arvalid & ram_arready) begin
                     cpu_state <= CPU_WAIT_RDATA;
-                    rom_arvalid<=1'b0;
-                    rom_rready <=1'b0;
+                    ram_arvalid<=1'b0;
+                    ram_rready <=1'b0;
                 end
             end else if(cpu_state==CPU_WAIT_RDATA) begin
                 global_en<=1'b0;
-                if (rom_rvalid) begin
-                    inst<=rom_rdata;
-                    rom_arvalid<=1'b0;
-                    rom_rready<=1'b1;
+                if (ram_rvalid) begin
+                    inst<=ram_rdata;
+                    ram_arvalid<=1'b0;
+                    ram_rready<=1'b1;
+                    cpu_state<=CPU_RAM_FETCHEDINST_IDLE;
+                end
+            end else if(cpu_state==CPU_RAM_FETCHEDINST_IDLE) begin
+                if (ram_rready) begin
+                    ram_rready<=1'b0;
                     cpu_state<=CPU_DECODE;
+                    axibus_take<=BUS_NOTAKE;
                 end
             end else if(cpu_state==CPU_RAM_LOAD_IDLE) begin
-                global_en<=1'b0;
-                ram_arvalid <=1'b1;
-                ram_rready<=1'b0;
-                cpu_state<=CPU_WAIT_RAM_LOAD_AR;
+                if (ram_rready) begin
+                    ram_rready<=1'b0;
+                    global_en<=1'b1;
+                    cpu_state<=CPU_EXCUTE;
+                    axibus_take<=BUS_NOTAKE;
+                end else begin
+                    global_en<=1'b0;
+                    ram_arvalid <=1'b1;
+                    ram_rready<=1'b0;
+                    cpu_state<=CPU_WAIT_RAM_LOAD_AR;
+                end
             end else if (cpu_state == CPU_WAIT_RAM_LOAD_AR) begin
                 global_en<=1'b0;
                 if (ram_arready & ram_arvalid) begin
@@ -157,12 +168,18 @@ module minirv (
                     ram_rready<=1'b1;
                     ram_arvalid<=1'b0;
                     mem_read_data_nomask<=ram_rdata;
-                    cpu_state<=CPU_EXCUTE;
+                    cpu_state<=CPU_RAM_LOAD_IDLE;
                 end
             end else if (cpu_state==CPU_RAM_STORE_IDLE) begin
-                global_en<=1'b0;
-                ram_awvalid <=1'b1;
-                cpu_state<=CPU_WAIT_RAM_STORE_AW;
+                if (ram_bready) begin
+                    ram_bready<=1'b0;
+                    axibus_take<=BUS_NOTAKE; //释放总线
+                    cpu_state<=CPU_IDLE;
+                end else begin
+                    global_en<=1'b0;
+                    ram_awvalid <=1'b1;
+                    cpu_state<=CPU_WAIT_RAM_STORE_AW;
+                end
             end else if (cpu_state==CPU_WAIT_RAM_STORE_AW) begin
                 if (ram_awready & ram_awvalid) begin
                     ram_awvalid<=1'b0;
@@ -176,8 +193,8 @@ module minirv (
                 end
             end else if (cpu_state == CPU_WAIT_RAM_STORE_B) begin
                 if (ram_bvalid) begin
-                    ram_bready<=1'b1;
-                    cpu_state<=CPU_IDLE;
+                    ram_bready<=1'b1; //确保握手成功. slave可能很快,不能被它抢跑
+                    cpu_state<=CPU_RAM_STORE_IDLE;
                 end
             end
 

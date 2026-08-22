@@ -426,7 +426,7 @@ void ftrace_backtrace(void) {
 
     const CallFrame *callee = &call_stack[nr_frames - i];
     const uint32_t call_site = callee->return_pc - 4u;
-    printf(FMT_CYAN "#%-2zu" FMT_NONE " 0x%08x in " FMT_GREEN "%s" FMT_NONE
+    printf(FMT_CYAN "#%-2zu" FMT_NONE "branch on 0x%08x in " FMT_GREEN "%s" FMT_NONE
                    " ()@[0x%08x,0x%08x)\n",
            i, call_site, function_name(frame->function),
            function_start(frame->function), function_end(frame->function));

@@ -25,7 +25,6 @@ void add_mmio_map(const char *name, uint32_t start, uint32_t size,
                   uint8_t *space, memory_handler_t handler);
 
 /* C-side AXI memory models. */
-void prom_read(void);
 void pmem_read(void);
 void pmem_write_axi(void);
 

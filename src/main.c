@@ -5,6 +5,7 @@
 #include "color.h"
 #include "cpu.h"
 #include "device.h"
+#include "device/include/vga.h"
 #include "difftest.h"
 #include "disasm.h"
 #include "ftrace.h"
@@ -92,7 +93,7 @@ int main(int argc, char **argv) {
 
 #ifdef CONFIG_FTRACE
   if (get_npc_state() == SIM_END) {
-    ftrace_dump_history();
+    // ftrace_dump_history();
   }
 #endif
 
@@ -102,6 +103,7 @@ int main(int argc, char **argv) {
   destroy_simulator();
   destroy_ftrace();
   destroy_memory();
+  destory_device();
   
   return sim_exit_code();
 }

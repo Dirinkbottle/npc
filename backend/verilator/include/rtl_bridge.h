@@ -21,15 +21,6 @@ bool rtl_bridge_reg_read(uint32_t index, uint32_t *value);
 bool rtl_bridge_csr_read(uint32_t index, uint32_t *value);
 bool rtl_bridge_csr_write(uint32_t index, uint32_t value);
 
-bool rtl_bridge_set_axi_rom_arready(bool value);
-bool rtl_bridge_set_axi_rom_rvalid(bool value);
-bool rtl_bridge_set_axi_rom_rdata(uint32_t data);
-bool rtl_bridge_get_axi_rom_arready(void);
-bool rtl_bridge_get_axi_rom_rvalid(void);
-uint32_t rtl_bridge_get_axi_rom_rdata(void);
-bool rtl_bridge_get_axi_rom_cpu_arvalid(void);
-bool rtl_bridge_get_axi_rom_cpu_rready(void);
-uint32_t rtl_bridge_get_axi_rom_cpu_araddr(void);
 
 bool rtl_bridge_set_axi_ram_arready(bool value);
 bool rtl_bridge_set_axi_ram_rvalid(bool value);

@@ -29,15 +29,6 @@ bool cpu_csr_write(uint32_t index, uint32_t value);
 void cpu_exec(uint64_t n);
 
 /* AXI 总线接口：set 写 RTL 输入，get 读 RTL 输出。 */
-bool cpu_axi_set_rom_arready(bool value);
-bool cpu_axi_set_rom_rvalid(bool value);
-bool cpu_axi_set_rom_rdata(uint32_t data);
-bool cpu_axi_get_rom_arready(void);
-bool cpu_axi_get_rom_rvalid(void);
-uint32_t cpu_axi_get_rom_rdata(void);
-bool cpu_axi_get_rom_cpu_arvalid(void);
-bool cpu_axi_get_rom_cpu_rready(void);
-uint32_t cpu_axi_get_rom_cpu_araddr(void);
 
 bool cpu_axi_set_ram_arready(bool value);
 bool cpu_axi_set_ram_rvalid(bool value);

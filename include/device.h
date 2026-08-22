@@ -7,6 +7,9 @@
 #define UART_MMIO_SIZE 8u
 
 void init_devices(void);
+void device_update(void);
 void putch(char ch);
+void destory_device();
+extern void vga_update_screen(void);
 
 #endif
