@@ -54,6 +54,7 @@ bool cpu_axi_get_ram_cpu_bready(void);
 extern uint8_t cpu_clk;
 extern uint8_t cpu_rst;
 extern uint64_t cpu_total_cycle;
+extern uint64_t cpu_total_inst;
 void ebreak(void);
 
 #endif

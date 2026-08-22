@@ -106,23 +106,20 @@ module minirv (
                 ram_arvalid<=1'b1;
                 ram_rready <=1'b0;
             end else if(cpu_state==CPU_DECODE) begin
-                global_en<=1'b0;
                 if (is_load) begin
                     cpu_state<=CPU_RAM_LOAD_IDLE;
+                    axibus_take<=BUS_TAKEBY_LSU;
+                end else if (is_store) begin
+                    cpu_state <= CPU_RAM_STORE_IDLE;
                     axibus_take<=BUS_TAKEBY_LSU;
                 end else begin
                     cpu_state<=CPU_EXCUTE;
                     global_en<=1'b1;
                 end
             end else if (cpu_state==CPU_EXCUTE) begin
-                global_en<=1'b0;
-                if (is_store) begin
-                    cpu_state <= CPU_RAM_STORE_IDLE;
-                    axibus_take<=BUS_TAKEBY_LSU;
-                end else begin
-                    inst<=32'b0;
-                    cpu_state <= CPU_IDLE;
-                end
+                inst<=32'b0;
+                global_en<=1'b0; 
+                cpu_state <= CPU_IDLE;
             end else if(cpu_state==CPU_WAIT_AR) begin
                 global_en<=1'b0;
                 if (ram_arvalid & ram_arready) begin
@@ -174,7 +171,8 @@ module minirv (
                 if (ram_bready) begin
                     ram_bready<=1'b0;
                     axibus_take<=BUS_NOTAKE; //释放总线
-                    cpu_state<=CPU_IDLE;
+                    cpu_state<=CPU_EXCUTE;
+                    global_en<=1'b1;
                 end else begin
                     global_en<=1'b0;
                     ram_awvalid <=1'b1;

@@ -32,4 +32,7 @@ void pmem_write_axi(void);
 void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
                 bool skip_difftest_one);
 
+extern uint64_t device_mmio_memory_read;
+extern uint64_t device_mmio_memory_write;
+
 #endif

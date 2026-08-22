@@ -10,4 +10,7 @@ void difftest_sync_initial(void);
 void difftest_step(uint32_t pc, uint32_t inst);
 void difftest_skip_ref(void);
 
+extern uint64_t difftest_skip_count;
+extern uint64_t difftest_exec_count;
+
 #endif

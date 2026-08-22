@@ -1,5 +1,6 @@
 #include "cpu.h"
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -16,6 +17,7 @@
 static SimState sim_state = SIM_STOP;
 static int exit_good = 0;
 uint64_t cpu_total_cycle = 0;
+uint64_t cpu_total_inst = 0;
 
 void set_npc_state(SimState state) { sim_state = state; }
 SimState get_npc_state(void) { return sim_state; }
@@ -89,15 +91,21 @@ static void exec_once(bool view_trace) {
 
   uint32_t new_pc = rtl_bridge_pc();
   if (new_pc!=pc) {
+    cpu_total_inst++;
+    // 此时指令应该为0,为取指令状态
+     uint32_t check_inst =rtl_bridge_inst();
+     (void)check_inst;
+     assert(check_inst == 0);
     itrace_record(pc, inst);
-  }else {
-    // 是旧指令或者无效,跳过这条指令执行
-    difftest_skip_ref();
+
+    // 执行difftest
+    #ifdef CONFIG_DIFFTEST
+      difftest_step(pc, inst);
+    #endif
+
   }
 
-#ifdef CONFIG_DIFFTEST
-  difftest_step(pc, inst);
-#endif
+
   ftrace_step(pc, inst, cpu_current_pc());
   if (fbreakpoint_check(cpu_current_pc())) {
     set_npc_state(SIM_STOP);

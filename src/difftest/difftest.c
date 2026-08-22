@@ -51,6 +51,8 @@ static void (*ref_exec)(uint64_t n);
 static void (*ref_raise_intr)(uint64_t no);
 static void (*ref_init)(int port);
 static bool skip_ref_once;
+uint64_t difftest_skip_count = 0;
+uint64_t difftest_exec_count = 0;
 
 static bool load_symbol(void *handle, void *target, const char *name) {
   void *symbol = dlsym(handle, name);
@@ -137,10 +139,11 @@ static void print_mismatch_header(uint32_t pc, uint32_t inst) {
 void difftest_step(uint32_t pc, uint32_t inst) {
   if (skip_ref_once) {
     skip_ref_once = false;
+    difftest_skip_count++;
     sync_dut_state_to_ref();
     return;
   }
-
+  difftest_exec_count++;
   ref_exec(1);
 
   DifftestCpuState ref_state = {0};

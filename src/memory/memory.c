@@ -28,6 +28,8 @@ static MemoryRegion mmio_maps[MAX_MMIO_MAPS];
 static size_t nr_mmio_maps = 0;
 static size_t image_size = 0;
 static uint32_t last_pc = PMEM_BASE;
+uint64_t device_mmio_memory_read = 0;
+uint64_t device_mmio_memory_write = 0;
 
 static bool range_inside(uint32_t addr, uint32_t len,
                          uint32_t low, uint32_t high) {
@@ -101,6 +103,7 @@ static MemoryRegion *find_mmio(uint32_t addr, uint32_t len) {
 static uint32_t mmio_read(MemoryRegion *map, uint32_t addr, uint32_t len,
                           bool skip_difftest_one) {
 #ifdef CONFIG_DIFFTEST
+
   if (skip_difftest_one) {
     difftest_skip_ref();
   }
@@ -119,7 +122,9 @@ static uint32_t mmio_read(MemoryRegion *map, uint32_t addr, uint32_t len,
 
 static void mmio_write(MemoryRegion *map, uint32_t addr, uint32_t len,
                        uint32_t data, bool skip_difftest_one) {
+
 #ifdef CONFIG_DIFFTEST
+
   if (skip_difftest_one) {
     difftest_skip_ref();
   }
@@ -287,7 +292,6 @@ static uint32_t mask_to_offset(uint8_t byte_mask) {
 }
 void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
                 bool skip_difftest_one) {
-
   byte_mask &= 0x0fu;
 
   const uint32_t width  = mask_to_width((uint8_t)byte_mask);
@@ -317,8 +321,8 @@ void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
   }
 
   MemoryRegion *map = find_mmio(addr, width);
-
   if (map != NULL) {
+    device_mmio_memory_write++;
     mmio_write(map, addr, width, wdata, skip_difftest_one);
     return;
   }
@@ -355,6 +359,7 @@ static uint32_t pmem_read_data(uint32_t raddr, unsigned char byte_mask,
 
   MemoryRegion *map = find_mmio(addr, width);
   if (map != NULL) {
+    device_mmio_memory_read++;
     return mmio_read(map, addr, width, skip_difftest_one);
   }
 

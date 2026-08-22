@@ -37,7 +37,43 @@ void output_marchid(){
 }
 
 void output_cycles(void) {
-  printf("total cycles = %llu\n", (unsigned long long)cpu_total_cycle);
+  puts(FMT_BOLD FMT_CYAN "\n========== Simulation statistics ==========" FMT_NONE);
+#define TRUE_PREFIX FMT_GREEN "[TRUE]:" FMT_NONE
+  printf(TRUE_PREFIX " total cycles                 = %llu\n",
+         (unsigned long long)cpu_total_cycle);
+  printf(TRUE_PREFIX " total instructions           = %llu\n",
+         (unsigned long long)cpu_total_inst);
+  printf(TRUE_PREFIX " device MMIO memory reads      = %llu\n",
+         (unsigned long long)device_mmio_memory_read);
+  printf(TRUE_PREFIX " device MMIO memory writes     = %llu\n",
+         (unsigned long long)device_mmio_memory_write);
+  printf(TRUE_PREFIX " difftest skipped instructions  = %llu\n",
+         (unsigned long long)difftest_skip_count);
+  printf(TRUE_PREFIX " difftest executed instructions = %llu\n",
+         (unsigned long long)difftest_exec_count);
+
+#ifdef CONFIG_DIFFTEST
+  const uint64_t difftest_instruction_count =
+      difftest_skip_count + difftest_exec_count;
+  if (difftest_instruction_count == cpu_total_inst) {
+    printf(FMT_GREEN
+           "[TRUE]: difftest_check: skip %llu + exec %llu == %llu"
+           FMT_NONE "\n",
+           (unsigned long long)difftest_skip_count,
+           (unsigned long long)difftest_exec_count,
+           (unsigned long long)cpu_total_inst);
+  } else {
+    printf(FMT_RED
+           "[FALSE]: difftest_check: skip %llu + exec %llu != %llu"
+           FMT_NONE "\n",
+           (unsigned long long)difftest_skip_count,
+           (unsigned long long)difftest_exec_count,
+           (unsigned long long)cpu_total_inst);
+    assert(0);
+  }
+#endif
+  puts(FMT_BOLD FMT_CYAN "============================================" FMT_NONE);
+#undef TRUE_PREFIX
 }
 
 int main(int argc, char **argv) {
