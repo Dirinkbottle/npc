@@ -1,214 +1,428 @@
+#include "memory.h"
 
-extern "C" const uint8_t _binary_img_bin_start[];
-extern "C" const uint8_t _binary_img_bin_end[];
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-namespace {
+#include "color.h"
+#include "cpu.h"
+#include "difftest.h"
+#include "trace.h"
 
-uint8_t *ram = nullptr;
-MemoryRegion mmio_maps[MAX_MMIO_MAPS] = {};
-std::size_t nr_mmio_maps = 0;
-uint8_t uart_space[UART_MMIO_SIZE] = {};
-std::size_t image_size = 0;
+extern const uint8_t _binary_img_bin_start[];
+extern const uint8_t _binary_img_bin_end[];
 
-constexpr std::size_t TRACE_RING_SIZE = 16;
-constexpr std::size_t ITRACE_PREFETCH_SIZE = 3;
+typedef struct MemoryRegion {
+  const char *name;
+  uint32_t start;
+  uint32_t end; /* inclusive */
+  uint8_t *space;
+  memory_handler_t handler;
+} MemoryRegion;
 
-bool range_inside(uint32_t addr, uint32_t len, uint32_t low, uint32_t high) {
+static uint8_t *ram = NULL;
+static MemoryRegion mmio_maps[MAX_MMIO_MAPS];
+static size_t nr_mmio_maps = 0;
+static size_t image_size = 0;
+static uint32_t last_pc = PMEM_BASE;
+uint64_t device_mmio_memory_read = 0;
+uint64_t device_mmio_memory_write = 0;
+
+static bool range_inside(uint32_t addr, uint32_t len,
+                         uint32_t low, uint32_t high) {
   assert(len > 0);
-  const uint64_t access_end = static_cast<uint64_t>(addr) + len - 1;
+  const uint64_t access_end = (uint64_t)addr + len - 1u;
   return addr >= low && access_end <= high;
 }
 
-uint32_t pmem_high() {
-  return PMEM_BASE + static_cast<uint32_t>(PMEM_SIZE) - 1;
+static uint32_t pmem_high(void) {
+  return PMEM_BASE + (uint32_t)PMEM_SIZE - 1u;
 }
 
-uint32_t mask_to_width(uint8_t byte_mask) {
-  switch (byte_mask) {
-    case 0b1: return 1;
-    case 0b11: return 2;
-    case 0b1111: return 4;
-    default:
-      printf(FMT_RED "invalid memory mask 0x%02x" FMT_NONE "\n", byte_mask);
-      sim_abort();
-      return 0;
+static void print_byte_mask(uint8_t byte_mask) {
+  printf("byte_mask=0b");
+  for (int i = 7; i >= 0; i--) {
+    putchar((byte_mask & (1u << i)) ? '1' : '0');
   }
 }
 
-uint32_t aligned_addr(uint32_t addr, uint32_t width) {
-  return addr & ~(width - 1);
+static uint32_t mask_to_width(uint8_t byte_mask) {
+  switch (byte_mask) {
+    case 0x01u:
+    case 0x02u:
+    case 0x04u:
+    case 0x08u:
+      return 1u;
+
+    case 0x03u:
+    case 0x0cu:
+      return 2u;
+
+    case 0x0fu:
+      return 4u;
+
+    default:
+      printf(FMT_RED "invalid memory mask 0x%02x (" FMT_NONE, byte_mask);
+      print_byte_mask(byte_mask);
+      printf(FMT_RED ")" FMT_NONE "\n");
+      sim_abort();
+      return 0u;
+  }
 }
 
-uint32_t load_le(const uint8_t *space, uint32_t len) {
+static uint32_t aligned_addr(uint32_t addr, uint32_t width) {
+  return addr & ~(width - 1u);
+}
+
+static uint32_t load_le(const uint8_t *space, uint32_t len) {
   uint32_t data = 0;
   for (uint32_t i = 0; i < len; i++) {
-    data |= static_cast<uint32_t>(space[i]) << (i * 8);
+    data |= (uint32_t)space[i] << (i * 8u);
   }
   return data;
 }
 
-// This is deliberately not prom_read(): an MDB display must neither change
-// last_pc nor look like an architectural instruction fetch to the tracer.
-#if defined(CONFIG_TRACE) || defined(CONFIG_ITRACE)
-bool peek_instruction(uint32_t pc, uint32_t *inst) {
-  if (ram == nullptr || !range_inside(pc, 4, PMEM_BASE, pmem_high())) {
-    return false;
+static void store_le(uint8_t *space, uint32_t len, uint32_t data) {
+  for (uint32_t i = 0; i < len; i++) {
+    space[i] = (uint8_t)(data >> (i * 8u));
   }
-  *inst = load_le(ram + pc - PMEM_BASE, 4);
-  return true;
 }
+
+static MemoryRegion *find_mmio(uint32_t addr, uint32_t len) {
+  for (size_t i = 0; i < nr_mmio_maps; i++) {
+    if (range_inside(addr, len, mmio_maps[i].start, mmio_maps[i].end)) {
+      return &mmio_maps[i];
+    }
+  }
+  return NULL;
+}
+
+static uint32_t mmio_read(MemoryRegion *map, uint32_t addr, uint32_t len,
+                          bool skip_difftest_one) {
+#ifdef CONFIG_DIFFTEST
+
+  if (skip_difftest_one) {
+    difftest_skip_ref();
+  }
+#else
+  (void)skip_difftest_one;
 #endif
 
-void store_le(uint8_t *space, uint32_t len, uint32_t data) {
-  for (uint32_t i = 0; i < len; i++) {
-    space[i] = static_cast<uint8_t>(data >> (i * 8));
+  const uint32_t offset = addr - map->start;
+  if (map->handler != NULL) {
+    map->handler(offset, len, false);
   }
+  const uint32_t data = load_le(map->space + offset, len);
+  dtrace_record(map->name, addr, len, false, data);
+  return data;
+}
+
+static void mmio_write(MemoryRegion *map, uint32_t addr, uint32_t len,
+                       uint32_t data, bool skip_difftest_one) {
+
+#ifdef CONFIG_DIFFTEST
+
+  if (skip_difftest_one) {
+    difftest_skip_ref();
+  }
+#else
+  (void)skip_difftest_one;
+#endif
+
+  const uint32_t offset = addr - map->start;
+  store_le(map->space + offset, len, data);
+  if (map->handler != NULL) {
+    map->handler(offset, len, true);
+  }
+  dtrace_record(map->name, addr, len, true, data);
 }
 
 bool init_memory(const char *image_file) {
-  ram = static_cast<uint8_t *>(malloc(PMEM_SIZE));
-  if (ram == nullptr) {
-    fprintf(stderr, FMT_RED "failed to allocate %zu bytes of PMEM" FMT_NONE
-                        "\n",
+  destroy_memory();
+
+  ram = malloc(PMEM_SIZE);
+  if (ram == NULL) {
+    fprintf(stderr, FMT_RED "failed to allocate %zu bytes of PMEM" FMT_NONE "\n",
             PMEM_SIZE);
     return false;
   }
   memset(ram, 0, PMEM_SIZE);
+  image_size = 0;
+  last_pc = PMEM_BASE;
 
-  if (image_file == nullptr) {
+  if (image_file == NULL) {
     return true;
   }
 
   FILE *image = fopen(image_file, "rb");
-  if (image == nullptr) {
+  if (image == NULL) {
     fprintf(stderr, FMT_RED "cannot open image '%s'" FMT_NONE "\n", image_file);
+    destroy_memory();
     return false;
   }
 
-  image_size = 0;
   while (image_size < PMEM_SIZE) {
-    const std::size_t remaining = PMEM_SIZE - image_size;
-    const std::size_t nread = fread(ram + image_size, 1, remaining, image);
+    const size_t remaining = PMEM_SIZE - image_size;
+    const size_t nread = fread(ram + image_size, 1, remaining, image);
     image_size += nread;
     if (nread < remaining) {
       if (ferror(image)) {
-        fprintf(stderr, FMT_RED "failed while reading image '%s'" FMT_NONE
-                            "\n",
+        fprintf(stderr, FMT_RED "failed while reading image '%s'" FMT_NONE "\n",
                 image_file);
         fclose(image);
+        destroy_memory();
         return false;
       }
       break;
     }
   }
+
   if (image_size == PMEM_SIZE && fgetc(image) != EOF) {
     fprintf(stderr, FMT_RED "image '%s' exceeds PMEM (%zu bytes)" FMT_NONE "\n",
             image_file, PMEM_SIZE);
     fclose(image);
+    destroy_memory();
     return false;
   }
   fclose(image);
 
-  const uint32_t first_inst = image_size >= 4 ? load_le(ram, 4) : 0;
-  printf(FMT_CYAN "[image]" FMT_NONE " %zu bytes <- %s, entry=0x%08x "
-                 "first-inst=0x%08x\n",
+  const uint32_t first_inst = image_size >= 4u ? load_le(ram, 4u) : 0u;
+  printf(FMT_CYAN "[image]" FMT_NONE " %zu bytes <- %s, entry=0x%08x first-inst=0x%08x\n",
          image_size, image_file, PMEM_BASE, first_inst);
   return true;
 }
 
-bool init_internal_img() {
-  if (!init_memory(nullptr)) {
+bool init_internal_img(void) {
+  if (!init_memory(NULL)) {
     return false;
   }
 
-  const std::size_t size = _binary_img_bin_end - _binary_img_bin_start;
+  const size_t size = (size_t)(_binary_img_bin_end - _binary_img_bin_start);
   if (size > PMEM_SIZE) {
-    fprintf(stderr, FMT_RED "internal img (%zu bytes) exceeds PMEM (%zu bytes)"
-                        FMT_NONE "\n",
+    fprintf(stderr,
+            FMT_RED "internal img (%zu bytes) exceeds PMEM (%zu bytes)" FMT_NONE "\n",
             size, PMEM_SIZE);
+    destroy_memory();
     return false;
   }
+
   memcpy(ram, _binary_img_bin_start, size);
   image_size = size;
 
   printf(FMT_CYAN "[image]" FMT_NONE " %zu bytes <- built-in img, "
-         FMT_GREEN "copied to [0x%08x, 0x%08x]" FMT_NONE "\n",
+                  FMT_GREEN "copied to [0x%08x, 0x%08x]" FMT_NONE "\n",
          image_size, PMEM_BASE,
-         PMEM_BASE + static_cast<uint32_t>(image_size) - 1);
+         image_size == 0u ? PMEM_BASE : PMEM_BASE + (uint32_t)image_size - 1u);
   return true;
 }
 
-void destroy_memory() {
+void destroy_memory(void) {
   free(ram);
-  ram = nullptr;
+  ram = NULL;
+  image_size = 0;
 }
 
-uint8_t *pmem_space() {
+uint8_t *pmem_space(void) {
   return ram;
 }
 
-std::size_t pmem_image_size() {
+size_t pmem_image_size(void) {
   return image_size;
 }
 
-extern "C" void pmem_write(uint32_t waddr, uint32_t wdata, char byte_mask,
-                           bool skip_difftest_one) {
-  const uint32_t width = mask_to_width(static_cast<uint8_t>(byte_mask));
-  if (width == 0) {
+uint32_t memory_last_pc(void) {
+  return last_pc;
+}
+
+bool debug_pmem_read(uint32_t addr, uint32_t len, uint32_t *data) {
+  if (data == NULL || ram == NULL || (len != 1u && len != 2u && len != 4u) ||
+      !range_inside(addr, len, PMEM_BASE, pmem_high())) {
+    return false;
+  }
+  *data = load_le(ram + addr - PMEM_BASE, len);
+  return true;
+}
+
+void add_mmio_map(const char *name, uint32_t start, uint32_t size,
+                  uint8_t *space, memory_handler_t handler) {
+  assert(name != NULL);
+  assert(size > 0u);
+  assert(space != NULL);
+  assert(nr_mmio_maps < MAX_MMIO_MAPS);
+
+  const uint64_t end = (uint64_t)start + size - 1u;
+  assert(end <= UINT32_MAX);
+  const uint32_t high = (uint32_t)end;
+  assert(high < PMEM_BASE || start > pmem_high());
+
+  for (size_t i = 0; i < nr_mmio_maps; i++) {
+    assert(high < mmio_maps[i].start || start > mmio_maps[i].end);
+  }
+
+  mmio_maps[nr_mmio_maps++] = (MemoryRegion){
+      .name = name,
+      .start = start,
+      .end = high,
+      .space = space,
+      .handler = handler,
+  };
+}
+static uint32_t mask_to_offset(uint8_t byte_mask) {
+  switch (byte_mask) {
+    case 0x01u: return 0u;  // 0001
+    case 0x02u: return 1u;  // 0010
+    case 0x04u: return 2u;  // 0100
+    case 0x08u: return 3u;  // 1000
+
+    case 0x03u: return 0u;  // 0011
+    case 0x0cu: return 2u;  // 1100
+
+    case 0x0fu: return 0u;  // 1111
+
+    default:
+      printf(FMT_RED "invalid memory mask 0x%02x (" FMT_NONE, byte_mask);
+      print_byte_mask(byte_mask);
+      printf(FMT_RED ")" FMT_NONE "\n");
+      sim_abort();
+      return 0u;
+  }
+}
+void pmem_write(uint32_t waddr, uint32_t wdata, unsigned char byte_mask,
+                bool skip_difftest_one) {
+  byte_mask &= 0x0fu;
+
+  const uint32_t width  = mask_to_width((uint8_t)byte_mask);
+  const uint32_t offset = mask_to_offset((uint8_t)byte_mask);
+
+  if (width == 0u) {
     return;
   }
-  const uint32_t addr = aligned_addr(waddr, width);
 
-  if (range_inside(addr, width, PMEM_BASE, pmem_high())) {
+  // 总线给出的地址必须 4B 对齐
+  if ((waddr & 0x3u) != 0) {
+    printf(FMT_RED "unaligned memory write at 0x%08x (width=%u) " FMT_NONE,
+           waddr, width);
+    print_byte_mask((uint8_t)byte_mask);
+    printf("\n");
+    sim_abort();
+    return;
+  }
+
+  // 根据 byte mask 定位实际 byte 地址
+  const uint32_t addr = waddr + offset;
+
+  if (ram != NULL && range_inside(addr, width, PMEM_BASE, pmem_high())) {
     store_le(ram + addr - PMEM_BASE, width, wdata);
     mtrace_record(addr, width, true, wdata);
     return;
   }
-  if (MemoryRegion *map = find_mmio(addr, width); map != nullptr) {
+
+  MemoryRegion *map = find_mmio(addr, width);
+  if (map != NULL) {
+    device_mmio_memory_write++;
     mmio_write(map, addr, width, wdata, skip_difftest_one);
     return;
   }
 
   printf(FMT_RED "invalid memory write at 0x%08x" FMT_NONE
-         " (width=%u, data=0x%08x): address is outside PMEM [0x%08x, 0x%08x] and no MMIO device matches"
-         " (pc=0x%08x)\n",
-         waddr, width, wdata, PMEM_BASE, pmem_high(), last_pc);
+                 " (width=%u, data=0x%08x, pc=0x%08x)\n",
+         addr, width, wdata, last_pc);
+
   sim_abort();
 }
 
-extern "C" uint32_t prom_read(uint32_t rom_addr) {
-  if (!range_inside(rom_addr, 4, PMEM_BASE, pmem_high())) {
-    printf(FMT_RED "instruction fetch outside PMEM at pc=0x%08x" FMT_NONE "\n",
-           rom_addr);
-    sim_abort();
-    return 0;
-  }
-  last_pc = rom_addr;
-  return load_le(ram + rom_addr - PMEM_BASE, 4);
-}
+typedef enum{
+  IDLE=1,WAIT_ARVALID,WAIT_RREADY
+} axi_enum;
+axi_enum axi_ram_state = IDLE;
+uint32_t ram_addr;
+uint32_t ram_random_cycle_to_wait = 0;
+bool ram_already_give_data=false;
 
-extern "C" uint32_t pmem_read(uint32_t raddr, unsigned char byte_mask,
-                              bool skip_difftest_one) {
+static uint32_t pmem_read_data(uint32_t raddr, unsigned char byte_mask,
+                               bool skip_difftest_one) {
   const uint32_t width = mask_to_width(byte_mask);
-  if (width == 0) {
-    return 0;
+  if (width == 0u) {
+    return 0u;
   }
+
   const uint32_t addr = aligned_addr(raddr, width);
 
-  if (range_inside(addr, width, PMEM_BASE, pmem_high())) {
+  if (ram != NULL && range_inside(addr, width, PMEM_BASE, pmem_high())) {
     const uint32_t data = load_le(ram + addr - PMEM_BASE, width);
     mtrace_record(addr, width, false, data);
     return data;
   }
-  if (MemoryRegion *map = find_mmio(addr, width); map != nullptr) {
+
+  MemoryRegion *map = find_mmio(addr, width);
+  if (map != NULL) {
+    device_mmio_memory_read++;
     return mmio_read(map, addr, width, skip_difftest_one);
   }
 
   printf(FMT_RED "invalid memory read at 0x%08x" FMT_NONE
-         " (width=%u): address is outside PMEM [0x%08x, 0x%08x] and no MMIO device matches"
-         " (pc=0x%08x)\n",
-         raddr, width, PMEM_BASE, pmem_high(), last_pc);
+                 " (width=%u, pc=0x%08x)\n",
+         raddr, width, last_pc);
   sim_abort();
-  return 0;
+  return 0u;
 }
 
+// AXI-Lite 状态机，驱动 RAM 侧读写。
+void pmem_read() {
+  if (ram_random_cycle_to_wait >= 1) {
+    // ram_random_cycle_to_wait = random() % 2;
+    ram_random_cycle_to_wait = 1;
+  }
+
+  switch (axi_ram_state) {
+    case IDLE:
+      axi_ram_state = WAIT_ARVALID;
+      cpu_axi_set_ram_rvalid(0);
+      cpu_axi_set_ram_rdata(0);
+      cpu_axi_set_ram_arready(0);
+    break;
+    case WAIT_ARVALID: {
+      bool arvalid = cpu_axi_get_ram_cpu_arvalid();
+      if (arvalid) {
+        if (--ram_random_cycle_to_wait == 0) {
+          cpu_axi_set_ram_arready(1);
+          ram_addr = cpu_axi_get_ram_cpu_araddr();
+          axi_ram_state = WAIT_RREADY;
+        }
+      }
+    }
+    break;
+    case WAIT_RREADY: {
+      if ((ram_addr & 3u) != 0u) {
+        printf(FMT_RED "unaligned RAM read at 0x%08x " FMT_NONE, ram_addr);
+        print_byte_mask(0x0fu);
+        printf("\n");
+        sim_abort();
+        assert(0);
+      }
+      if (--ram_random_cycle_to_wait == 0 && !ram_already_give_data) {
+        last_pc = cpu_current_pc();
+        uint32_t rdata = pmem_read_data(ram_addr, 0x0fu, true);
+        cpu_axi_set_ram_rdata(rdata);
+        ram_already_give_data = true;
+        cpu_axi_set_ram_rvalid(1);
+      }
+
+      bool rready = cpu_axi_get_ram_cpu_rready();
+      if (rready && ram_already_give_data) {
+        ram_already_give_data =false;
+        axi_ram_state = IDLE;
+      }
+    }
+    break;
+    default:
+      printf("AXI RAM should be initialed!\n");
+      assert(0);
+    break;
+  }
+
+  return;
+}

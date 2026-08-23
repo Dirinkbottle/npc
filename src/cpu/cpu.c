@@ -1,86 +1,147 @@
+#include "cpu.h"
 
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
 
+#include "color.h"
+#include "config.h"
+#include "difftest.h"
+#include "ftrace.h"
+#include "memory.h"
+#include "rtl_bridge.h"
+#include "sdb.h"
+#include "trace.h"
+#include "device.h"
 
-void set_npc_state(SimState state) {
-  sim_state = state;
-}
+static SimState sim_state = SIM_STOP;
+static int exit_good = 0;
+uint64_t cpu_total_cycle = 0;
+uint64_t cpu_total_inst = 0;
 
-void sim_abort() {
+void set_npc_state(SimState state) { sim_state = state; }
+SimState get_npc_state(void) { return sim_state; }
+void sim_abort(void) {
   if (sim_state != SIM_END) {
     sim_state = SIM_ABORT;
     exit_good = -1;
   }
 }
+bool sim_is_running(void) { return sim_state == SIM_RUNNING; }
+int sim_exit_code(void) { return exit_good; }
 
-bool sim_is_running() {
-  return sim_state == SIM_RUNNING;
+bool init_simulator(int argc, char **argv) { return rtl_bridge_init(argc, argv); }
+void destroy_simulator(void) { rtl_bridge_destroy(); }
+
+uint32_t cpu_current_pc(void) {
+  const uint32_t pc = rtl_bridge_pc();
+  return pc == 0u ? PMEM_BASE : pc;
 }
 
+bool cpu_reg_read(uint32_t index, uint32_t *value) { return rtl_bridge_reg_read(index, value); }
+bool cpu_csr_read(uint32_t index, uint32_t *value) { return rtl_bridge_csr_read(index, value); }
+bool cpu_csr_write(uint32_t index, uint32_t value) { return rtl_bridge_csr_write(index, value); }
 
-static void difftest_stepone(uint32_t pc, uint32_t inst);
+bool cpu_axi_set_ram_arready(bool value) { return rtl_bridge_set_axi_ram_arready(value); }
+bool cpu_axi_set_ram_rvalid(bool value) { return rtl_bridge_set_axi_ram_rvalid(value); }
+bool cpu_axi_set_ram_rdata(uint32_t data) { return rtl_bridge_set_axi_ram_rdata(data); }
+bool cpu_axi_set_ram_awready(bool value) { return rtl_bridge_set_axi_ram_awready(value); }
+bool cpu_axi_set_ram_wready(bool value) { return rtl_bridge_set_axi_ram_wready(value); }
+bool cpu_axi_set_ram_bvalid(bool value) { return rtl_bridge_set_axi_ram_bvalid(value); }
 
-static void exec_once(bool display_trace) {
-  if (display_trace) {
-    trace_begin_step();
-  }
+bool cpu_axi_get_ram_arready(void) { return rtl_bridge_get_axi_ram_arready(); }
+bool cpu_axi_get_ram_rvalid(void) { return rtl_bridge_get_axi_ram_rvalid(); }
+uint32_t cpu_axi_get_ram_rdata(void) { return rtl_bridge_get_axi_ram_rdata(); }
+bool cpu_axi_get_ram_cpu_arvalid(void) { return rtl_bridge_get_axi_ram_cpu_arvalid(); }
+bool cpu_axi_get_ram_cpu_rready(void) { return rtl_bridge_get_axi_ram_cpu_rready(); }
+uint32_t cpu_axi_get_ram_cpu_araddr(void) { return rtl_bridge_get_axi_ram_cpu_araddr(); }
 
-  // Data loads and instruction fetch happen while the clock is low.  Capture
-  // the architectural instruction before the rising edge commits it.
-  top->clk = 0;
-  eval_and_dump();
+bool cpu_axi_get_ram_cpu_awvalid(void) { return rtl_bridge_get_axi_ram_cpu_awvalid(); }
+uint32_t cpu_axi_get_ram_cpu_awaddr(void) { return rtl_bridge_get_axi_ram_cpu_awaddr(); }
+bool cpu_axi_get_ram_cpu_wvalid(void) { return rtl_bridge_get_axi_ram_cpu_wvalid(); }
+uint32_t cpu_axi_get_ram_cpu_wdata(void) { return rtl_bridge_get_axi_ram_cpu_wdata(); }
+uint8_t cpu_axi_get_ram_cpu_wstrb(void) { return rtl_bridge_get_axi_ram_cpu_wstrb(); }
+bool cpu_axi_get_ram_cpu_bready(void) { return rtl_bridge_get_axi_ram_cpu_bready(); }
 
-  const uint32_t pc = top->rootp->minirv__DOT__pc;
-  const uint32_t inst = top->rootp->minirv__DOT__inst;
-  itrace_record(pc, inst);
-  if (top->inv) {
-    printf(FMT_RED "Invalid instruction at pc 0x%08x" FMT_NONE "\n", pc);
-    sim_abort();
-    if (display_trace) {
-      trace_print_pending();
-    }
-    return;
-  }
+void ebreak(void) {
+  uint32_t a0 = 0;
+  (void)cpu_reg_read(10u, &a0);
+  exit_good = a0 == 0u ? 0 : 1;
+  sim_state = SIM_END;
 
-  top->clk = 1;
-  eval_and_dump();
+  const char *color = a0 == 0u ? FMT_GREEN : FMT_RED;
+  printf("%s%s%s a0:%u\n", color,
+         a0 == 0u ? "HIT GOOD TRAP!" : "HIT BAD TRAP!", FMT_NONE, a0);
+}
+
+static void exec_once(bool view_trace) {
+  rtl_bridge_set_clock(false);
+  rtl_bridge_eval();
+
+  const uint32_t pc = rtl_bridge_pc();
+  const uint32_t inst = rtl_bridge_inst();
   
-  difftest_stepone(pc, inst);
 
-#ifdef CONFIG_FTRACE
+  if (view_trace) {
+    itrace_print(pc, inst);
+  }
+
+  rtl_bridge_set_clock(true);
+  rtl_bridge_eval(); //上升沿才有可能更新pc
+
+  uint32_t new_pc = rtl_bridge_pc();
+  if (new_pc!=pc) {
+    cpu_total_inst++;
+    // 此时指令应该为0,为取指令状态
+     uint32_t check_inst =rtl_bridge_inst();
+     (void)check_inst;
+     assert(check_inst == 0);
+    itrace_record(pc, inst);
+
+    // 执行difftest
+    #ifdef CONFIG_DIFFTEST
+      difftest_step(pc, inst);
+    #endif
+
+  }
+
+
   ftrace_step(pc, inst, cpu_current_pc());
-#endif
-  if (sim_is_running() && wp_scan() > 0) {
+  if (fbreakpoint_check(cpu_current_pc())) {
     set_npc_state(SIM_STOP);
   }
 
-  if (display_trace) {
-    trace_print_pending();
+  if (sim_is_running() && wp_scan() > 0) {
+    set_npc_state(SIM_STOP);
   }
 }
 
-void cpu_exec(uint64_t n, bool print_step) {
-  if (top == nullptr || sim_state == SIM_END || sim_state == SIM_ABORT ||
-      sim_state == SIM_QUIT) {
+static void cpu_update_total_cycle(void) {
+  uint32_t mcycle = 0;
+  uint32_t mcycleh = 0;
+  if (!cpu_csr_read(0xb00u, &mcycle) || !cpu_csr_read(0xb80u, &mcycleh)) {
+    return;
+  }
+  cpu_total_cycle = ((uint64_t)mcycleh << 32) | mcycle;
+}
+
+void cpu_exec(uint64_t n) {
+  const bool view_trace = n < 10u && n > 0u;
+  if (sim_state == SIM_END || sim_state == SIM_ABORT || sim_state == SIM_QUIT) {
+    cpu_update_total_cycle();
     return;
   }
 
   sim_state = SIM_RUNNING;
   while (n > 0 && sim_is_running()) {
-    const bool old_debug_enable = debug_enable;
-    debug_enable = old_debug_enable || print_step;
-    exec_once(debug_enable || print_step);
-    debug_enable = old_debug_enable;
+    exec_once(view_trace);
+    device_update();
     n--;
   }
 
+  cpu_update_total_cycle();
+
   if (sim_is_running()) {
     sim_state = SIM_STOP;
-  }
-
-  // `c` normally remains quiet.  If it stops because of a trap or an error,
-  // show the most recent rings so the terminal point remains debuggable.
-  if ((sim_state == SIM_END || sim_state == SIM_ABORT) && !print_step &&
-      !debug_enable) {
-    trace_dump();
   }
 }

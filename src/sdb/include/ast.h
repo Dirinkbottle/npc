@@ -1,8 +1,10 @@
-#ifndef __AST_H__
-#define __AST_H__
+#ifndef NPC_SDB_AST_H
+#define NPC_SDB_AST_H
+
+#include <stdbool.h>
 
 typedef enum {
-  AST_INT,AST_LONG, AST_DOUBLE, AST_STRING, AST_REG,
+  AST_INT, AST_LONG, AST_DOUBLE, AST_STRING, AST_REG,
   AST_NEG, AST_NOT, AST_DEREF, AST_BITNOT,
   AST_ADD, AST_SUB, AST_MUL, AST_DIV,
   AST_EQ, AST_NEQ, AST_LT, AST_GT, AST_LE, AST_GE,
@@ -15,11 +17,11 @@ typedef enum {
 typedef struct ASTNode {
   ASTType type;
   union {
-    int   int_val;
+    int int_val;
     long long long_val;
-    double    dbl_val;
-    char      str_val[32];
-    char      reg_name[8];
+    double dbl_val;
+    char str_val[32];
+    char reg_name[8];
     struct { struct ASTNode *operand; } unary;
     struct { struct ASTNode *left, *right; } binary;
     struct { struct ASTNode *cond, *true_expr, *false_expr; } ternary;
@@ -45,5 +47,6 @@ ASTNode *ast_new_binary(ASTType type, ASTNode *left, ASTNode *right);
 ASTNode *ast_new_cond(ASTNode *cond, ASTNode *true_expr, ASTNode *false_expr);
 ASTNode *ast_parse(void);
 ASTNode *asttree_execute(ASTNode *asttree);
-ASTNode *expr(char* e);
+ASTNode *expr(char *e);
+
 #endif
